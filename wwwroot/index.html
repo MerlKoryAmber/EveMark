@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jita — закуп</title>
+  <style>
+    :root {
+      --sidebar-width: clamp(200px, 18vw, 260px);
+      --top-h: clamp(48px, 7vh, 64px);
+      --pad-x: clamp(12px, 2vw, 32px);
+      --pad-y: clamp(8px, 1.5vh, 16px);
+      --ir-primary: #0f1b2e;
+      --ir-primary-dark: #0a1220;
+      --ir-primary-light: #1a2d4a;
+      --ir-accent: #c9a96e;
+      --ir-accent-hover: #b89a60;
+      --ir-accent-light: rgba(201, 169, 110, 0.16);
+      --ir-bg: #0c121c;
+      --ir-surface: #141c2a;
+      --ir-surface-hover: #1a2436;
+      --ir-border: #2a3548;
+      --ir-border-light: #232d3f;
+      --ir-text: #c9a96e;
+      --ir-text-secondary: #b89a60;
+      --ir-text-muted: #8a94a3;
+      --ir-danger: #e06b63;
+      --space-sm: clamp(6px, 0.8vw, 8px);
+      --space-md: clamp(10px, 1.4vw, 16px);
+      --space-lg: clamp(14px, 2vw, 24px);
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+      --font: Inter, "Segoe UI", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { width: 0; height: 0; display: none; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      font-family: var(--font);
+      background: var(--ir-bg);
+      color: var(--ir-text);
+      line-height: 1.5;
+      font-size: clamp(14px, 0.95vw + 10px, 16px);
+    }
+    a { color: var(--ir-accent); text-decoration: none; }
+    a:hover { color: var(--ir-accent-hover); text-decoration: underline; }
+    .app-shell { display: flex; height: 100%; min-height: 0; overflow: hidden; }
+    .sidebar {
+      width: var(--sidebar-width);
+      flex: 0 0 var(--sidebar-width);
+      background: var(--ir-primary);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-right: 1px solid var(--ir-border);
+      z-index: 100;
+    }
+    .sidebar-brand {
+      flex-shrink: 0;
+      height: var(--top-h);
+      display: flex;
+      align-items: center;
+      padding: 0 var(--space-md);
+      border-bottom: 1px solid var(--ir-border);
+    }
+    .brand-title { font-size: 0.92rem; font-weight: 600; line-height: 1.25; }
+    .brand-sub {
+      display: block;
+      font-size: 0.65rem;
+      color: var(--ir-accent);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-top: 2px;
+    }
+    .sidebar-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-md) 0; scrollbar-width: none; }
+    .sidebar-nav::-webkit-scrollbar { width: 0; }
+    .nav-item {
+      display: flex;
+      width: 100%;
+      padding: 10px var(--space-lg);
+      color: color-mix(in srgb, var(--ir-accent) 72%, transparent);
+      font: inherit;
+      font-size: 1.02rem;
+      font-weight: 500;
+      background: transparent;
+      border: 0;
+      border-left: 3px solid transparent;
+      cursor: pointer;
+      text-align: left;
+    }
+    .nav-item:hover { background: color-mix(in srgb, var(--ir-accent) 10%, transparent); color: var(--ir-text); }
+    .nav-item.active {
+      background: color-mix(in srgb, var(--ir-accent) 14%, transparent);
+      color: var(--ir-text);
+      border-left-color: var(--ir-accent);
+    }
+    .sidebar-foot {
+      flex-shrink: 0;
+      padding: var(--space-md) var(--space-lg);
+      border-top: 1px solid var(--ir-border);
+      font-size: 0.78rem;
+      color: color-mix(in srgb, var(--ir-accent) 48%, transparent);
+    }
+    .main {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .topbar {
+      flex: 0 0 var(--top-h);
+      height: var(--top-h);
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      padding: 0 var(--pad-x);
+      background: var(--ir-surface);
+      border-bottom: 1px solid var(--ir-border);
+    }
+    .topbar h2 { margin: 0; flex: 1 1 auto; font-size: clamp(1rem, 2.2vw, 1.35rem); font-weight: 600; }
+    .topbar-user { font-size: 0.85rem; color: var(--ir-text-secondary); text-align: right; }
+    .err { color: var(--ir-danger); }
+    .nav-toggle { display: none; }
+    .view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .view[hidden] { display: none !important; }
+    .toolbar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      flex-wrap: wrap;
+      padding: var(--pad-y) var(--pad-x);
+      border-bottom: 1px solid var(--ir-border);
+    }
+    .toolbar-hint { font-size: 0.78rem; color: var(--ir-text-muted); }
+    .filter-input, .field input {
+      height: 2.2em;
+      padding: 0 0.7em;
+      border: 1px solid var(--ir-border);
+      border-radius: var(--radius-sm);
+      background: var(--ir-surface);
+      color: var(--ir-text);
+      font: inherit;
+      font-size: 0.88rem;
+    }
+    .filter-input { flex: 1 1 12rem; max-width: 20rem; min-width: 0; }
+    .filter-input:focus, .field input:focus { outline: none; border-color: var(--ir-accent); }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.5em 1em;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      font: inherit;
+      font-size: 0.88rem;
+      font-weight: 500;
+      cursor: pointer;
+      background: var(--ir-accent);
+      color: var(--ir-primary-dark);
+    }
+    .btn:hover { background: var(--ir-accent-hover); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: transparent; color: var(--ir-text); border-color: var(--ir-border); }
+    .btn-secondary:hover { background: var(--ir-surface-hover); border-color: var(--ir-accent); }
+    .work {
+      flex: 1 1 0%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: var(--pad-y) var(--pad-x);
+    }
+    .work-scroll { display: block; overflow: auto; }
+    .table-wrap {
+      flex: 1 1 0%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--ir-surface);
+      border: 1px solid var(--ir-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+    .table-scroll { flex: 1 1 0%; min-height: 0; overflow: auto; }
+    table.data { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
+    table.data th, table.data td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--ir-border-light);
+      white-space: nowrap;
+      color: var(--ir-text);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    table.data th.left, table.data td.left { text-align: left; }
+    table.data th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--ir-primary-light);
+      color: var(--ir-text-secondary);
+      font-weight: 600;
+      cursor: pointer;
+    }
+    table.data th:hover { color: var(--ir-accent); }
+    table.data tbody tr:hover td { background: var(--ir-surface-hover); }
+    .empty { padding: 24px; color: var(--ir-text-muted); text-align: center; }
+    table.data thead tr.cols th { top: 0; z-index: 3; }
+    table.data thead tr.filters th {
+      top: 2.45rem;
+      z-index: 2;
+      padding: 4px 6px;
+      background: var(--ir-surface);
+      cursor: default;
+    }
+    table.data thead tr.cols th.sorted::after { content: " ↓"; }
+    table.data thead tr.cols th.sorted.asc::after { content: " ↑"; }
+    .range { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+    .col-filter {
+      width: 100%;
+      min-width: 6.5rem;
+      height: 1.8em;
+      padding: 0 0.35em;
+      border: 1px solid var(--ir-border);
+      border-radius: var(--radius-sm);
+      background: var(--ir-bg);
+      color: var(--ir-text);
+      font: inherit;
+      font-size: 0.8rem;
+    }
+    th.money .col-filter { min-width: 8rem; }
+    th.pct .col-filter { min-width: 4.5rem; }
+    th.compact .col-filter { min-width: 5.5rem; }
+    th.name .col-filter { min-width: 8rem; }
+    .col-filter:focus { outline: none; border-color: var(--ir-accent); }
+    .pager {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: var(--space-sm);
+      padding-top: var(--space-sm);
+      color: var(--ir-text-muted);
+      font-size: 0.88rem;
+    }
+    .banner {
+      flex: 0 0 auto;
+      margin-bottom: var(--space-sm);
+      padding: 14px 16px;
+      border: 1px solid var(--ir-border);
+      border-radius: var(--radius-md);
+      background: var(--ir-surface);
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+    .banner.shout {
+      border-color: var(--ir-accent);
+      background: var(--ir-accent-light);
+      color: var(--ir-text);
+    }
+    .banner.quiet, .banner.early { color: var(--ir-text-muted); font-weight: 500; }
+    .card {
+      max-width: 36rem;
+      margin-bottom: var(--space-md);
+      background: var(--ir-surface);
+      border: 1px solid var(--ir-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-lg);
+    }
+    .card h3 { margin: 0 0 8px; font-size: 1rem; }
+    .card p { margin: 0 0 16px; color: var(--ir-text-muted); font-size: 0.88rem; }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+    .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; color: var(--ir-text-muted); }
+    .form-msg { min-height: 1.2em; margin-top: 12px; font-size: 0.88rem; }
+    .backdrop { display: none; }
+    @media (max-width: 800px) {
+      .nav-toggle {
+        display: inline-flex;
+        background: transparent;
+        color: var(--ir-text);
+        border: 1px solid var(--ir-border);
+        border-radius: var(--radius-sm);
+        font: inherit;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        transform: translateX(-100%);
+        transition: transform 150ms ease;
+      }
+      .sidebar.open { transform: none; }
+      .backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 90; }
+      .backdrop.show { display: block; }
+      .fields { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="backdrop" id="backdrop"></div>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div>
+          <div class="brand-title">Jita</div>
+          <span class="brand-sub">закуп</span>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" type="button" data-view="board">Закуп</button>
+        <button class="nav-item" type="button" data-view="signal">Сигнал</button>
+        <button class="nav-item" type="button" data-view="fees">Настройки</button>
+      </nav>
+      <div class="sidebar-foot">Jita 4-4 · снимок раз в час</div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <button class="nav-toggle" id="nav-toggle" type="button">Меню</button>
+        <h2 id="title">Закуп</h2>
+        <div class="topbar-user" id="status">загрузка…</div>
+      </header>
+
+      <section class="view" id="view-board">
+        <div class="toolbar">
+          <button id="collect" class="btn" type="button">Снять сейчас</button>
+          <span class="toolbar-hint" id="rates"></span>
+        </div>
+        <div class="work">
+          <div class="table-wrap">
+            <div class="table-scroll">
+              <table class="data">
+                <thead>
+                  <tr class="cols">
+                    <th class="left" data-k="name">Предмет</th>
+                    <th data-k="bestBuy">Покупка</th>
+                    <th data-k="bestSell">Продажа</th>
+                    <th data-k="marginIsk">Маржа</th>
+                    <th data-k="marginFrac">%</th>
+                    <th data-k="dailyVolume">Объём/сутки</th>
+                    <th class="sorted" data-k="dailyIsk" title="Маржа × минимум из вчерашнего объёма и обеих полос 1%">Оценка/сутки</th>
+                    <th data-k="hours">Часов</th>
+                    <th data-k="buyVolume" title="Объём и ордера в пределах 1% от лучшей цены покупки">На покупке</th>
+                    <th data-k="sellVolume" title="Объём и ордера в пределах 1% от лучшей цены продажи">На продаже</th>
+                  </tr>
+                  <tr class="filters">
+                    <th class="left name"><input class="col-filter" data-f="name" type="search" aria-label="Предмет"></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="bestBuyMin" type="search" placeholder="от" aria-label="Покупка от"><input class="col-filter" data-f="bestBuyMax" type="search" placeholder="до" aria-label="Покупка до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="bestSellMin" type="search" placeholder="от" aria-label="Продажа от"><input class="col-filter" data-f="bestSellMax" type="search" placeholder="до" aria-label="Продажа до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="marginIskMin" type="search" placeholder="от" aria-label="Маржа от"><input class="col-filter" data-f="marginIskMax" type="search" placeholder="до" aria-label="Маржа до"></span></th>
+                    <th class="pct"><span class="range"><input class="col-filter" data-f="marginFracMin" type="search" placeholder="от" aria-label="Процент от"><input class="col-filter" data-f="marginFracMax" type="search" placeholder="до" aria-label="Процент до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="dailyVolumeMin" type="search" placeholder="от" aria-label="Объём от"><input class="col-filter" data-f="dailyVolumeMax" type="search" placeholder="до" aria-label="Объём до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="dailyIskMin" type="search" placeholder="от" aria-label="Оценка от"><input class="col-filter" data-f="dailyIskMax" type="search" placeholder="до" aria-label="Оценка до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="hoursMin" type="search" placeholder="от" aria-label="Часов от"><input class="col-filter" data-f="hoursMax" type="search" placeholder="до" aria-label="Часов до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="buyVolumeMin" type="search" placeholder="от" aria-label="На покупке от"><input class="col-filter" data-f="buyVolumeMax" type="search" placeholder="до" aria-label="На покупке до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="sellVolumeMin" type="search" placeholder="от" aria-label="На продаже от"><input class="col-filter" data-f="sellVolumeMax" type="search" placeholder="до" aria-label="На продаже до"></span></th>
+                  </tr>
+                </thead>
+                <tbody id="body"></tbody>
+              </table>
+              <div class="empty" id="empty" hidden>В этом снимке нет строк с плюсовой маржой.</div>
+            </div>
+          </div>
+          <div class="pager">
+            <button id="prev" class="btn btn-secondary" type="button">←</button>
+            <span id="page-label">страница 1 из 1</span>
+            <button id="next" class="btn btn-secondary" type="button">→</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-signal" hidden>
+        <div class="toolbar">
+          <button class="btn" type="button" data-signal="shout">Крик</button>
+          <button class="btn btn-secondary" type="button" data-signal="off">Мимо цены</button>
+          <button class="btn btn-secondary" type="button" data-signal="churn">Дёргают</button>
+          <button class="btn btn-secondary" type="button" data-signal="squeeze">Сжимается</button>
+          <span class="toolbar-hint" id="signal-hint"></span>
+        </div>
+        <div class="work">
+          <div id="signal-banner" class="banner early">Смотрим снимки…</div>
+          <div class="table-wrap">
+            <div class="table-scroll">
+              <table class="data" id="signal-table">
+                <thead>
+                  <tr class="cols">
+                    <th class="left" data-k="name">Предмет</th>
+                    <th data-k="bestBuy">Покупка</th>
+                    <th data-k="bestSell">Продажа</th>
+                    <th data-k="marginIsk">Маржа</th>
+                    <th data-k="marginFrac">%</th>
+                    <th data-k="dailyVolume">Объём/сутки</th>
+                    <th class="sorted" data-k="dailyIsk" title="Маржа × минимум из вчерашнего объёма и обеих полос 1%">Оценка/сутки</th>
+                    <th data-k="hours">Часов</th>
+                  </tr>
+                  <tr class="filters">
+                    <th class="left name"><input class="col-filter" data-f="name" type="search" aria-label="Предмет"></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="bestBuyMin" type="search" placeholder="от" aria-label="Покупка от"><input class="col-filter" data-f="bestBuyMax" type="search" placeholder="до" aria-label="Покупка до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="bestSellMin" type="search" placeholder="от" aria-label="Продажа от"><input class="col-filter" data-f="bestSellMax" type="search" placeholder="до" aria-label="Продажа до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="marginIskMin" type="search" placeholder="от" aria-label="Маржа от"><input class="col-filter" data-f="marginIskMax" type="search" placeholder="до" aria-label="Маржа до"></span></th>
+                    <th class="pct"><span class="range"><input class="col-filter" data-f="marginFracMin" type="search" placeholder="от" aria-label="Процент от"><input class="col-filter" data-f="marginFracMax" type="search" placeholder="до" aria-label="Процент до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="dailyVolumeMin" type="search" placeholder="от" aria-label="Объём от"><input class="col-filter" data-f="dailyVolumeMax" type="search" placeholder="до" aria-label="Объём до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="dailyIskMin" type="search" placeholder="от" aria-label="Оценка от"><input class="col-filter" data-f="dailyIskMax" type="search" placeholder="до" aria-label="Оценка до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="hoursMin" type="search" placeholder="от" aria-label="Часов от"><input class="col-filter" data-f="hoursMax" type="search" placeholder="до" aria-label="Часов до"></span></th>
+                  </tr>
+                </thead>
+                <tbody id="signal-body"></tbody>
+              </table>
+              <div class="empty" id="signal-empty" hidden>Пока пусто.</div>
+            </div>
+          </div>
+          <div class="pager">
+            <button id="signal-prev" class="btn btn-secondary" type="button">←</button>
+            <span id="signal-page-label">страница 1 из 1</span>
+            <button id="signal-next" class="btn btn-secondary" type="button">→</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-fees" hidden>
+        <div class="toolbar">
+          <button id="save" class="btn" type="button">Сохранить</button>
+          <span class="toolbar-hint">Срок в днях. Старше него стирается сразу и после каждого снимка.</span>
+        </div>
+        <div class="work work-scroll">
+          <div class="card">
+            <h3>Налог и брокерская</h3>
+            <p>
+              Accounting снижает налог с продажи от 7,5%. Broker Relations и стендинг к владельцу станции снижают брокерскую, пол — 1%.
+              Маржа считает постановку buy и sell: брокерская с обеих сторон, налог только с продажи. Перестановка ордера не входит.
+              Объём — продажи вчера по The Forge. День старше вчерашнего в этот столбец не входит. «На покупке» и «На продаже» — объём и число ордеров в пределах 1% от лучшей цены на своей стороне. Оценка — маржа с единицы, умноженная на меньшее из вчерашнего объёма и этих двух полос. Таблица по 200 строк, дальше стрелки внизу. У цифр два поля друг под другом: «от» и «до», пустое не ограничивает. Процент вводится как в столбце. «На покупке» и «На продаже» фильтруют штуки, не число ордеров.
+              «Часов» — сколько последних снимков подряд маржа была плюсовой; разрыв больше 90 минут обрывает ряд.
+            </p>
+            <div class="fields">
+              <label class="field">Accounting (0–5)
+                <input id="accounting" type="number" min="0" max="5" step="1" value="5">
+              </label>
+              <label class="field">Broker Relations (0–5)
+                <input id="broker" type="number" min="0" max="5" step="1" value="5">
+              </label>
+              <label class="field">Стендинг к фракции (−10…10)
+                <input id="faction" type="number" min="-10" max="10" step="0.01" value="0">
+              </label>
+              <label class="field">Стендинг к корпорации (−10…10)
+                <input id="corp" type="number" min="-10" max="10" step="0.01" value="0">
+              </label>
+            </div>
+            <div class="form-msg" id="form-msg"></div>
+          </div>
+          <div class="card">
+            <h3>База</h3>
+            <p>
+              Снимки и дневная история старше срока удаляются. Файл после этого не растёт: свободные страницы занимают новые снимки.
+              Сохранение ещё и ужимает файл. Журнал рядом с базой держится в пределах 2 МБ.
+            </p>
+            <div class="fields">
+              <label class="field">Хранить, дней (1–400)
+                <input id="keep-days" type="number" min="1" max="400" step="1" value="120">
+              </label>
+            </div>
+            <div class="form-msg" id="db-size">Считаем размер…</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+  <script>
+    const isk = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
+    const iskWhole = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
+    const pct = new Intl.NumberFormat("ru-RU", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const titles = { board: "Закуп", signal: "Сигнал", fees: "Настройки" };
+    let sortKey = "dailyIsk";
+    let sortDir = -1;
+    let signalKind = "shout";
+    let signalSort = "dailyIsk";
+    let signalDir = -1;
+    let signalPage = 1;
+    const signalViews = {
+      shout: {
+        sort: "dailyIsk", dir: -1,
+        hint: "Маржа 3–100%. Вчера от 10 шт. Средняя вчера между покупкой и продажей. Обе стороны от 2 шт, так 6 часов. Оценка от 10 млн.",
+        cols: [
+          ["name", "Предмет", "text"],
+          ["bestBuy", "Покупка", "isk", "money"],
+          ["bestSell", "Продажа", "isk", "money"],
+          ["marginIsk", "Маржа", "isk", "money"],
+          ["marginFrac", "%", "pct", "pct"],
+          ["dailyVolume", "Объём/сутки", "num", "compact"],
+          ["dailyIsk", "Оценка/сутки", "isk", "money"],
+          ["hours", "Часов", "num", "compact"],
+          ["thin", "Тонко", "text"]
+        ]
+      },
+      off: {
+        sort: "dailyIsk", dir: -1,
+        hint: "Те же пороги, но вчерашняя средняя цена вне спреда.",
+        cols: [
+          ["name", "Предмет", "text"],
+          ["bestBuy", "Покупка", "isk", "money"],
+          ["bestSell", "Продажа", "isk", "money"],
+          ["average", "Вчера", "isk", "money"],
+          ["marginIsk", "Маржа", "isk", "money"],
+          ["marginFrac", "%", "pct", "pct"],
+          ["dailyVolume", "Объём/сутки", "num", "compact"],
+          ["dailyIsk", "Оценка/сутки", "isk", "money"]
+        ]
+      },
+      churn: {
+        sort: "buyMoves", dir: -1,
+        hint: "Последние часы лучшая покупка или продажа менялась каждый снимок.",
+        cols: [
+          ["name", "Предмет", "text"],
+          ["bestBuy", "Покупка", "isk", "money"],
+          ["bestSell", "Продажа", "isk", "money"],
+          ["marginIsk", "Маржа", "isk", "money"],
+          ["buyMoves", "Сдвигов покупки", "num", "compact"],
+          ["sellMoves", "Сдвигов продажи", "num", "compact"]
+        ]
+      },
+      squeeze: {
+        sort: "marginFrac", dir: 1,
+        hint: "Маржа падает три часа подряд и всё ещё плюсовая.",
+        cols: [
+          ["name", "Предмет", "text"],
+          ["bestBuy", "Покупка", "isk", "money"],
+          ["bestSell", "Продажа", "isk", "money"],
+          ["marginIsk", "Маржа", "isk", "money"],
+          ["marginThen", "Маржа была", "isk", "money"],
+          ["marginFrac", "%", "pct", "pct"]
+        ]
+      }
+    };
+    let page = 1;
+    let settingsReady = false;
+    let searchTimer = 0;
+    let signalSearchTimer = 0;
+
+    function bytes(n) {
+      const v = Number(n) || 0;
+      if (v < 1024 * 1024) return Math.max(1, Math.round(v / 1024)) + " КБ";
+      if (v < 1024 * 1024 * 1024) return (v / 1024 / 1024).toFixed(1) + " МБ";
+      return (v / 1024 / 1024 / 1024).toFixed(2) + " ГБ";
+    }
+
+    function msk(iso) {
+      if (!iso) return "ещё нет";
+      return new Date(iso).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) + " МСК";
+    }
+
+    function cell(value, kind) {
+      if (value == null || value === "") return "—";
+      if (kind === "pct") return pct.format(value);
+      if (kind === "num") return isk.format(value);
+      if (kind === "isk") return iskWhole.format(value);
+      return String(value);
+    }
+
+    function renderStatus(s) {
+      const bits = [`снимок: ${msk(s.lastSnapshotAt)}`];
+      if (s.state === "orders") bits.push("следующий: снимаем");
+      else if (s.nextSnapshotAt) bits.push(`следующий: ${msk(s.nextSnapshotAt)}`);
+      bits.push(`в базе: ${s.latestTypes}`);
+      if (s.state && s.state !== "idle") bits.push(s.detail || s.state);
+      else if (s.detail) bits.push(s.detail);
+      const el = document.getElementById("status");
+      el.textContent = bits.filter(Boolean).join(" · ");
+      if (s.lastError) {
+        const err = document.createElement("div");
+        err.className = "err";
+        err.textContent = s.lastError;
+        el.appendChild(err);
+      }
+      document.getElementById("collect").disabled = s.state === "orders";
+    }
+
+    function renderTable(meta) {
+      const shown = meta?.rows || [];
+      if (meta) {
+        document.getElementById("rates").textContent =
+          `Налог ${pct.format(meta.salesTax)}, брокерская ${pct.format(meta.brokerFee)}. ` +
+          `В снимке ${meta.tracked}, с плюсовой маржой ${meta.shown}.`;
+        page = meta.page || 1;
+        const pages = meta.pages || 1;
+        document.getElementById("page-label").textContent = `страница ${page} из ${pages}`;
+        document.getElementById("prev").disabled = page <= 1;
+        document.getElementById("next").disabled = page >= pages;
+        document.querySelectorAll("#view-board tr.cols th").forEach(th => {
+          const on = th.dataset.k === sortKey;
+          th.classList.toggle("sorted", on);
+          th.classList.toggle("asc", on && sortDir > 0);
+        });
+      }
+      const body = document.getElementById("body");
+      body.replaceChildren();
+      const empty = document.getElementById("empty");
+      empty.hidden = shown.length > 0;
+      empty.textContent = columnFilters().any
+        ? "Ничего не найдено."
+        : "В этом снимке нет строк с плюсовой маржой.";
+      for (const r of shown) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td class="left"><a href="https://evetycoon.com/market/60003760/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
+          `<td>${cell(r.bestBuy, "isk")}</td>` +
+          `<td>${cell(r.bestSell, "isk")}</td>` +
+          `<td>${cell(r.marginIsk, "isk")}</td>` +
+          `<td>${cell(r.marginFrac, "pct")}</td>` +
+          `<td title="${r.volumeDay || ""}">${cell(r.dailyVolume, "num")}</td>` +
+          `<td>${cell(r.dailyIsk, "isk")}</td>` +
+          `<td>${cell(r.hours, "num")}</td>` +
+          `<td>${cell(r.buyVolume, "num")} (${r.buyOrders})</td>` +
+          `<td>${cell(r.sellVolume, "num")} (${r.sellOrders})</td>`;
+        body.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+
+    function columnFilters() {
+      const params = new URLSearchParams({
+        page: String(page),
+        sort: sortKey,
+        dir: sortDir < 0 ? "desc" : "asc"
+      });
+      let any = false;
+      document.querySelectorAll("#view-board .col-filter").forEach(input => {
+        const value = input.value.trim();
+        if (!value) return;
+        params.set(input.dataset.f, value);
+        any = true;
+      });
+      return { params, any };
+    }
+
+    function showView(name) {
+      document.querySelectorAll(".nav-item").forEach(btn => btn.classList.toggle("active", btn.dataset.view === name));
+      document.querySelectorAll(".view").forEach(view => { view.hidden = view.id !== "view-" + name; });
+      document.getElementById("title").textContent = titles[name] || name;
+      document.getElementById("sidebar").classList.remove("open");
+      document.getElementById("backdrop").classList.remove("show");
+      if (name === "signal") loadSignals().catch(() => {});
+    }
+
+    async function loadSignals() {
+      const signal = await fetch("/api/signals?" + signalFilters().params).then(r => r.json());
+      const banner = document.getElementById("signal-banner");
+      banner.textContent = signal.banner || "";
+      banner.className = "banner " + (signal.tone || "early");
+      renderSignals(signal);
+    }
+
+    function signalFilters() {
+      const params = new URLSearchParams({
+        page: String(signalPage),
+        sort: signalSort,
+        dir: signalDir < 0 ? "desc" : "asc",
+        kind: signalKind
+      });
+      let any = false;
+      document.querySelectorAll("#view-signal .col-filter").forEach(input => {
+        const value = input.value.trim();
+        if (!value) return;
+        params.set(input.dataset.f, value);
+        any = true;
+      });
+      return { params, any };
+    }
+
+    function renderSignals(signal) {
+      const body = document.getElementById("signal-body");
+      body.replaceChildren();
+      const rows = signal?.rows || [];
+      signalPage = signal?.page || 1;
+      const pages = signal?.pages || 1;
+      document.getElementById("signal-page-label").textContent = `страница ${signalPage} из ${pages}`;
+      document.getElementById("signal-prev").disabled = signalPage <= 1;
+      document.getElementById("signal-next").disabled = signalPage >= pages;
+      document.querySelectorAll("#view-signal tr.cols th").forEach(th => {
+        const on = th.dataset.k === signalSort;
+        th.classList.toggle("sorted", on);
+        th.classList.toggle("asc", on && signalDir > 0);
+      });
+      const empty = document.getElementById("signal-empty");
+      const filtered = signalFilters().any;
+      empty.hidden = rows.length > 0 || signal?.tone === "early";
+      empty.textContent = filtered ? "Ничего не найдено." : "Пока пусто.";
+      const cols = signalViews[signalKind].cols;
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = cols.map(col => {
+          const [key, , kind] = col;
+          if (key === "name")
+            return `<td class="left"><a href="https://evetycoon.com/market/60003760/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>`;
+          if (kind === "text")
+            return `<td class="left">${escapeHtml(r[key] || "—")}</td>`;
+          return `<td>${cell(r[key], kind)}</td>`;
+        }).join("");
+        body.appendChild(tr);
+      }
+    }
+
+    function buildSignalHead() {
+      const view = signalViews[signalKind];
+      const cols = document.querySelector("#view-signal tr.cols");
+      const filters = document.querySelector("#view-signal tr.filters");
+      cols.replaceChildren();
+      filters.replaceChildren();
+      document.getElementById("signal-hint").textContent = view.hint;
+      for (const col of view.cols) {
+        const [key, title, kind, width] = col;
+        const th = document.createElement("th");
+        th.dataset.k = key;
+        th.textContent = title;
+        if (kind === "text") th.classList.add("left");
+        if (key === signalSort) {
+          th.classList.add("sorted");
+          if (signalDir > 0) th.classList.add("asc");
+        }
+        cols.appendChild(th);
+        const fh = document.createElement("th");
+        if (kind === "text") fh.classList.add("left", "name");
+        else if (width) fh.classList.add(width);
+        fh.innerHTML = kind === "text"
+          ? `<input class="col-filter" data-f="${key}" type="search" aria-label="${title}">`
+          : `<span class="range"><input class="col-filter" data-f="${key}Min" type="search" placeholder="от" aria-label="${title} от"><input class="col-filter" data-f="${key}Max" type="search" placeholder="до" aria-label="${title} до"></span>`;
+        filters.appendChild(fh);
+      }
+    }
+
+    function setSignalKind(kind) {
+      signalKind = kind;
+      signalPage = 1;
+      signalSort = signalViews[kind].sort;
+      signalDir = signalViews[kind].dir;
+      document.querySelectorAll("[data-signal]").forEach(btn => {
+        btn.classList.toggle("btn-secondary", btn.dataset.signal !== kind);
+      });
+      buildSignalHead();
+      loadSignals().catch(() => {});
+    }
+
+    async function tick() {
+      const status = await fetch("/api/status").then(r => r.json());
+      renderStatus(status);
+      const params = columnFilters().params;
+      const board = await fetch("/api/recommendations?" + params).then(r => r.json());
+      renderTable(board);
+      if (!document.getElementById("view-signal").hidden) await loadSignals();
+      if (!settingsReady) {
+        const s = await fetch("/api/settings").then(r => r.json());
+        document.getElementById("accounting").value = s.accounting;
+        document.getElementById("broker").value = s.brokerRelations;
+        document.getElementById("faction").value = s.factionStanding;
+        document.getElementById("corp").value = s.corpStanding;
+        document.getElementById("keep-days").value = s.keepDays;
+        document.getElementById("db-size").textContent = "Сейчас на диске: " + bytes(s.databaseBytes);
+        settingsReady = true;
+      }
+    }
+
+    document.querySelectorAll(".nav-item").forEach(btn => {
+      btn.addEventListener("click", () => showView(btn.dataset.view));
+    });
+    document.getElementById("nav-toggle").addEventListener("click", () => {
+      document.getElementById("sidebar").classList.toggle("open");
+      document.getElementById("backdrop").classList.toggle("show");
+    });
+    document.getElementById("backdrop").addEventListener("click", () => showView(
+      document.querySelector(".nav-item.active").dataset.view
+    ));
+    document.querySelectorAll("#view-board tr.cols th").forEach(th => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.k;
+        if (!key) return;
+        if (sortKey === key) sortDir *= -1;
+        else { sortKey = key; sortDir = key === "name" ? 1 : -1; }
+        page = 1;
+        tick().catch(() => {});
+      });
+    });
+    document.getElementById("signal-table").addEventListener("click", event => {
+      const th = event.target.closest("tr.cols th");
+      if (!th || !th.dataset.k) return;
+      const key = th.dataset.k;
+      if (signalSort === key) signalDir *= -1;
+      else { signalSort = key; signalDir = key === "name" || key === "thin" ? 1 : -1; }
+      signalPage = 1;
+      loadSignals().catch(() => {});
+    });
+    document.getElementById("signal-table").addEventListener("input", event => {
+      if (!event.target.classList.contains("col-filter")) return;
+      signalPage = 1;
+      clearTimeout(signalSearchTimer);
+      signalSearchTimer = setTimeout(() => { loadSignals().catch(() => {}); }, 300);
+    });
+    document.querySelectorAll("[data-signal]").forEach(btn => {
+      btn.addEventListener("click", () => setSignalKind(btn.dataset.signal));
+    });
+    document.getElementById("signal-prev").addEventListener("click", () => {
+      if (signalPage > 1) { signalPage -= 1; loadSignals().catch(() => {}); }
+    });
+    document.getElementById("signal-next").addEventListener("click", () => {
+      signalPage += 1;
+      loadSignals().catch(() => {});
+    });
+    document.querySelectorAll("#view-board .col-filter").forEach(input => {
+      input.addEventListener("input", () => {
+        page = 1;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => { tick().catch(() => {}); }, 300);
+      });
+    });
+    document.getElementById("prev").addEventListener("click", () => {
+      if (page > 1) { page -= 1; tick().catch(() => {}); }
+    });
+    document.getElementById("next").addEventListener("click", () => {
+      page += 1;
+      tick().catch(() => {});
+    });
+    document.getElementById("save").addEventListener("click", async () => {
+      const msg = document.getElementById("form-msg");
+      const body = {
+        accounting: Number(document.getElementById("accounting").value),
+        brokerRelations: Number(document.getElementById("broker").value),
+        factionStanding: Number(document.getElementById("faction").value),
+        corpStanding: Number(document.getElementById("corp").value),
+        keepDays: Number(document.getElementById("keep-days").value)
+      };
+      const resp = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!resp.ok) {
+        const err = await resp.json();
+        msg.textContent = err.error || "не сохранилось";
+        msg.className = "form-msg err";
+        return;
+      }
+      const saved = await resp.json();
+      msg.textContent = "Сохранено. Маржа пересчитана, старое стёрто.";
+      document.getElementById("db-size").textContent = "Сейчас на диске: " + bytes(saved.databaseBytes);
+      msg.className = "form-msg";
+      await tick();
+    });
+    document.getElementById("collect").addEventListener("click", async () => {
+      await fetch("/api/collect", { method: "POST" });
+      await tick();
+    });
+    buildSignalHead();
+    if (location.hash === "#signal") showView("signal");
+    tick();
+    setInterval(() => {
+      fetch("/api/status").then(r => r.json()).then(renderStatus).catch(() => {});
+    }, 30000);
+    setInterval(() => { tick().catch(() => {}); }, 300000);
+  </script>
+</body>
+</html>
