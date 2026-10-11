@@ -78,9 +78,11 @@ internal static class Program
             return Results.Ok(await db.GetSettingsAsync(ct));
         });
         app.MapPost("/api/collect", async (CollectorService collector) =>
-            await collector.TriggerAsync()
-                ? Results.Accepted()
-                : Results.Conflict(new { error = "Снятие уже идёт" }));
+        {
+            if (!await collector.TriggerAsync())
+                return Results.Conflict(new { started = false, error = "Снятие уже идёт" });
+            return Results.Json(new { started = true, state = "orders", detail = "запуск съёма…" }, statusCode: StatusCodes.Status202Accepted);
+        });
         app.MapGet("/api/signals", (
             MarketDb db,
             int? page,

@@ -29,6 +29,8 @@ public sealed class CollectorService : BackgroundService
         if (!await _orders.WaitAsync(0))
             return false;
 
+        await _db.SetStatusAsync("orders", "запуск съёма…", null);
+        _log.LogInformation("Ручной съём запущен");
         _ = Task.Run(async () =>
         {
             try
@@ -116,6 +118,7 @@ public sealed class CollectorService : BackgroundService
         Interlocked.Exchange(ref _ordersRunning, 1);
         try
         {
+            await _db.SetStatusAsync("orders", "запуск съёма…", null, ct);
             var rejected = await _db.RejectedIdsAsync(ct);
             var board = new Dictionary<int, BoardMerge>();
             var locationRows = new List<LocationQuoteInsert>();
@@ -326,7 +329,12 @@ public sealed class CollectorService : BackgroundService
 
         var recheck = await _db.RejectsToRecheckAsync(today, ct);
         if (recheck.Count > 0)
-            await FetchHistoryAsync(recheck, today, ct);
+        {
+            var forgeRecheck = recheck
+                .Select(id => new HistoryNeed(TradeHubs.ForgeRegionId, id))
+                .ToList();
+            await FetchHistoryAsync(forgeRecheck, today, ct);
+        }
 
         var needVol = await _db.TypesMissingVolumeAsync(400, ct);
         if (needVol.Count > 0)
@@ -376,27 +384,27 @@ public sealed class CollectorService : BackgroundService
         _log.LogInformation("Имена записаны: {Keep}, украшений убрано: {Skins}", keep.Count, skins.Count);
     }
 
-    private async Task FetchHistoryAsync(IReadOnlyList<int> typeIds, string today, CancellationToken ct)
+    private async Task FetchHistoryAsync(IReadOnlyList<HistoryNeed> jobs, string today, CancellationToken ct)
     {
         var done = 0;
         var failed = 0;
-        foreach (var chunk in typeIds.Chunk(8))
+        foreach (var chunk in jobs.Chunk(8))
         {
-            var results = await Task.WhenAll(chunk.Select(async typeId =>
+            var results = await Task.WhenAll(chunk.Select(async job =>
             {
                 try
                 {
-                    var bars = await _esi.FetchHistoryAsync(_options.RegionId, typeId, ct);
-                    return (typeId, bars, ok: true);
+                    var bars = await _esi.FetchHistoryAsync(job.RegionId, job.TypeId, ct);
+                    return (job.RegionId, job.TypeId, bars, ok: true);
                 }
                 catch (Exception ex)
                 {
-                    _log.LogWarning(ex, "История типа {TypeId} не получена", typeId);
-                    return (typeId, bars: (IReadOnlyList<HistoryBar>)[], ok: false);
+                    _log.LogWarning(ex, "История типа {TypeId} в регионе {RegionId} не получена", job.TypeId, job.RegionId);
+                    return (job.RegionId, job.TypeId, bars: (IReadOnlyList<HistoryBar>)[], ok: false);
                 }
             }));
 
-            foreach (var (typeId, bars, ok) in results)
+            foreach (var (regionId, typeId, bars, ok) in results)
             {
                 done++;
                 if (!ok)
@@ -407,19 +415,23 @@ public sealed class CollectorService : BackgroundService
 
                 if (!WasTraded(bars))
                 {
-                    await _db.RejectAsync([typeId], "no_trade", today, ct);
+                    if (regionId == TradeHubs.ForgeRegionId)
+                        await _db.RejectAsync([typeId], "no_trade", today, ct);
+                    else
+                        await _db.UpsertHistoryAsync(regionId, typeId, bars, today, _options.KeepDays, ct);
                     continue;
                 }
 
-                await _db.UnrejectAsync(typeId, ct);
-                await _db.UpsertHistoryAsync(typeId, bars, today, _options.KeepDays, ct);
+                if (regionId == TradeHubs.ForgeRegionId)
+                    await _db.UnrejectAsync(typeId, ct);
+                await _db.UpsertHistoryAsync(regionId, typeId, bars, today, _options.KeepDays, ct);
             }
 
-            if (done % 20 == 0 || done == typeIds.Count)
+            if (done % 20 == 0 || done == jobs.Count)
             {
                 await _db.SetStatusAsync(
                     "sync",
-                    $"история {done} из {typeIds.Count}",
+                    $"история {done} из {jobs.Count}",
                     failed == 0 ? null : $"история: ошибок {failed.ToString(CultureInfo.InvariantCulture)}",
                     ct);
             }

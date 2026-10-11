@@ -230,6 +230,7 @@ public sealed class MarketDb
                     name TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS daily_history (
+                    region_id INTEGER NOT NULL,
                     type_id INTEGER NOT NULL,
                     day TEXT NOT NULL,
                     volume INTEGER NOT NULL,
@@ -237,11 +238,13 @@ public sealed class MarketDb
                     highest TEXT NOT NULL,
                     lowest TEXT NOT NULL,
                     order_count INTEGER NOT NULL,
-                    PRIMARY KEY (type_id, day)
+                    PRIMARY KEY (region_id, type_id, day)
                 );
                 CREATE TABLE IF NOT EXISTS history_sync (
-                    type_id INTEGER PRIMARY KEY,
-                    synced_on TEXT NOT NULL
+                    region_id INTEGER NOT NULL,
+                    type_id INTEGER NOT NULL,
+                    synced_on TEXT NOT NULL,
+                    PRIMARY KEY (region_id, type_id)
                 );
                 CREATE TABLE IF NOT EXISTS setting (
                     key TEXT PRIMARY KEY,
@@ -304,6 +307,7 @@ public sealed class MarketDb
             await EnsureColumnAsync(conn, "quote", "buy_touch", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnAsync(conn, "quote", "sell_touch", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnAsync(conn, "type_name", "volume", "TEXT", ct);
+            await MigrateHistoryRegionAsync(conn, ct);
         }, ct);
     }
 
@@ -727,28 +731,52 @@ public sealed class MarketDb
         }, ct);
     }
 
-    public Task<IReadOnlyList<int>> TypesNeedingHistoryAsync(string todayUtc, CancellationToken ct = default) =>
+    public Task<IReadOnlyList<HistoryNeed>> TypesNeedingHistoryAsync(string todayUtc, CancellationToken ct = default) =>
         WithAsync(async conn =>
         {
-            var list = new List<int>();
+            var list = new List<HistoryNeed>();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                SELECT q.type_id
-                FROM quote q
-                LEFT JOIN history_sync h ON h.type_id = q.type_id
-                WHERE q.snapshot_id = (SELECT id FROM snapshot ORDER BY taken_at DESC LIMIT 1)
-                  AND q.type_id NOT IN (SELECT type_id FROM reject)
-                  AND (h.synced_on IS NULL OR h.synced_on < $today)
-                ORDER BY (CAST(q.best_sell AS REAL) - IFNULL(CAST(q.best_buy AS REAL), 0)) DESC
+                SELECT type_id, region_id FROM (
+                    SELECT q.type_id AS type_id, $forge AS region_id,
+                        (CAST(q.best_sell AS REAL) - IFNULL(CAST(q.best_buy AS REAL), 0)) AS score
+                    FROM quote q
+                    LEFT JOIN history_sync h ON h.type_id = q.type_id AND h.region_id = $forge
+                    WHERE q.snapshot_id = (SELECT id FROM snapshot ORDER BY taken_at DESC LIMIT 1)
+                      AND q.type_id NOT IN (SELECT type_id FROM reject)
+                      AND (h.synced_on IS NULL OR h.synced_on < $today)
+                    UNION
+                    SELECT lq.type_id, lq.region_id,
+                        (CAST(lq.best_sell AS REAL) - IFNULL(CAST(lq.best_buy AS REAL), 0)) AS score
+                    FROM location_quote lq
+                    LEFT JOIN history_sync h ON h.type_id = lq.type_id AND h.region_id = lq.region_id
+                    WHERE lq.snapshot_id = (SELECT id FROM snapshot ORDER BY taken_at DESC LIMIT 1)
+                      AND lq.type_id NOT IN (SELECT type_id FROM reject)
+                      AND (h.synced_on IS NULL OR h.synced_on < $today)
+                )
+                GROUP BY type_id, region_id
+                ORDER BY MAX(score) DESC
                 """;
             cmd.Parameters.AddWithValue("$today", todayUtc);
+            cmd.Parameters.AddWithValue("$forge", TradeHubs.ForgeRegionId);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
-                list.Add(Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture));
-            return (IReadOnlyList<int>)list;
+            {
+                list.Add(new HistoryNeed(
+                    Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture),
+                    Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture)));
+            }
+
+            return (IReadOnlyList<HistoryNeed>)list;
         }, ct);
 
-    public Task UpsertHistoryAsync(int typeId, IReadOnlyList<HistoryBar> bars, string todayUtc, int keepDays, CancellationToken ct = default) =>
+    public Task UpsertHistoryAsync(
+        int regionId,
+        int typeId,
+        IReadOnlyList<HistoryBar> bars,
+        string todayUtc,
+        int keepDays,
+        CancellationToken ct = default) =>
         WithAsync(async conn =>
         {
             var cut = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-keepDays).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -756,15 +784,16 @@ public sealed class MarketDb
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = (SqliteTransaction)tx;
             cmd.CommandText = """
-                INSERT INTO daily_history (type_id, day, volume, average, highest, lowest, order_count)
-                VALUES ($id, $day, $vol, $avg, $hi, $lo, $cnt)
-                ON CONFLICT(type_id, day) DO UPDATE SET
+                INSERT INTO daily_history (region_id, type_id, day, volume, average, highest, lowest, order_count)
+                VALUES ($reg, $id, $day, $vol, $avg, $hi, $lo, $cnt)
+                ON CONFLICT(region_id, type_id, day) DO UPDATE SET
                     volume = excluded.volume,
                     average = excluded.average,
                     highest = excluded.highest,
                     lowest = excluded.lowest,
                     order_count = excluded.order_count
                 """;
+            var pReg = cmd.Parameters.Add("$reg", SqliteType.Integer);
             var pId = cmd.Parameters.Add("$id", SqliteType.Integer);
             var pDay = cmd.Parameters.Add("$day", SqliteType.Text);
             var pVol = cmd.Parameters.Add("$vol", SqliteType.Integer);
@@ -772,6 +801,7 @@ public sealed class MarketDb
             var pHi = cmd.Parameters.Add("$hi", SqliteType.Text);
             var pLo = cmd.Parameters.Add("$lo", SqliteType.Text);
             var pCnt = cmd.Parameters.Add("$cnt", SqliteType.Integer);
+            pReg.Value = regionId;
             pId.Value = typeId;
             foreach (var bar in bars)
             {
@@ -790,9 +820,10 @@ public sealed class MarketDb
             await using var sync = conn.CreateCommand();
             sync.Transaction = (SqliteTransaction)tx;
             sync.CommandText = """
-                INSERT INTO history_sync (type_id, synced_on) VALUES ($id, $today)
-                ON CONFLICT(type_id) DO UPDATE SET synced_on = excluded.synced_on
+                INSERT INTO history_sync (region_id, type_id, synced_on) VALUES ($reg, $id, $today)
+                ON CONFLICT(region_id, type_id) DO UPDATE SET synced_on = excluded.synced_on
                 """;
+            sync.Parameters.AddWithValue("$reg", regionId);
             sync.Parameters.AddWithValue("$id", typeId);
             sync.Parameters.AddWithValue("$today", todayUtc);
             await sync.ExecuteNonQueryAsync(ct);
@@ -951,25 +982,25 @@ public sealed class MarketDb
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            var dayVolume = new Dictionary<int, long>();
+            var dayVolume = new Dictionary<(int TypeId, int RegionId), long>();
             await using (var histCmd = conn.CreateCommand())
             {
                 histCmd.CommandText = """
-                    SELECT h.type_id, h.day, h.volume
+                    SELECT h.type_id, h.region_id, h.day, h.volume
                     FROM daily_history h
                     JOIN (
-                        SELECT type_id, MAX(day) AS day
+                        SELECT type_id, region_id, MAX(day) AS day
                         FROM daily_history
                         WHERE day < $today
-                        GROUP BY type_id
-                    ) m ON m.type_id = h.type_id AND m.day = h.day
+                        GROUP BY type_id, region_id
+                    ) m ON m.type_id = h.type_id AND m.region_id = h.region_id AND m.day = h.day
                     """;
                 histCmd.Parameters.AddWithValue("$today", today);
                 await using var histReader = await histCmd.ExecuteReaderAsync(ct);
                 while (await histReader.ReadAsync(ct))
                 {
-                    if (histReader.GetString(1) == yesterday)
-                        dayVolume[ReadInt(histReader, 0)] = ReadLong(histReader, 2);
+                    if (histReader.GetString(2) == yesterday)
+                        dayVolume[(ReadInt(histReader, 0), ReadInt(histReader, 1))] = ReadLong(histReader, 3);
                 }
             }
 
@@ -1053,7 +1084,7 @@ public sealed class MarketDb
                         if (units < 1)
                             continue;
                         volumes.TryGetValue(typeId, out var m3);
-                        dayVolume.TryGetValue(typeId, out var traded);
+                        dayVolume.TryGetValue((typeId, toMeta.RegionId), out var traded);
                         var row = new HaulRow
                         {
                             TypeId = typeId,
@@ -1226,11 +1257,13 @@ public sealed class MarketDb
                 JOIN (
                     SELECT type_id, MAX(day) AS day
                     FROM daily_history
-                    WHERE day < $today
+                    WHERE day < $today AND region_id = $forge
                     GROUP BY type_id
                 ) m ON m.type_id = h.type_id AND m.day = h.day
+                WHERE h.region_id = $forge
                 """;
             cmd.Parameters.AddWithValue("$today", today);
+            cmd.Parameters.AddWithValue("$forge", TradeHubs.ForgeRegionId);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
                 history[ReadInt(reader, 0)] = new Hist(reader.GetString(1), ReadLong(reader, 2), ReadDec(reader, 3));
@@ -1714,20 +1747,79 @@ public sealed class MarketDb
 
     private static async Task EnsureColumnAsync(SqliteConnection conn, string table, string column, string type, CancellationToken ct)
     {
-        var found = false;
-        await using (var info = conn.CreateCommand())
+        if (!await HasColumnAsync(conn, table, column, ct))
+            await ExecAsync(conn, $"ALTER TABLE {table} ADD COLUMN {column} {type}");
+    }
+
+    private static async Task<bool> HasColumnAsync(SqliteConnection conn, string table, string column, CancellationToken ct)
+    {
+        await using var info = conn.CreateCommand();
+        info.CommandText = $"PRAGMA table_info({table})";
+        await using var reader = await info.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
         {
-            info.CommandText = $"PRAGMA table_info({table})";
-            await using var reader = await info.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static async Task MigrateHistoryRegionAsync(SqliteConnection conn, CancellationToken ct)
+    {
+        if (await HasColumnAsync(conn, "daily_history", "region_id", ct)
+            && await HasColumnAsync(conn, "history_sync", "region_id", ct))
+            return;
+
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        if (!await HasColumnAsync(conn, "daily_history", "region_id", ct))
+        {
+            await using (var cmd = conn.CreateCommand())
             {
-                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
-                    found = true;
+                cmd.Transaction = (SqliteTransaction)tx;
+                cmd.CommandText = """
+                    CREATE TABLE daily_history_v2 (
+                        region_id INTEGER NOT NULL,
+                        type_id INTEGER NOT NULL,
+                        day TEXT NOT NULL,
+                        volume INTEGER NOT NULL,
+                        average TEXT NOT NULL,
+                        highest TEXT NOT NULL,
+                        lowest TEXT NOT NULL,
+                        order_count INTEGER NOT NULL,
+                        PRIMARY KEY (region_id, type_id, day)
+                    );
+                    INSERT INTO daily_history_v2 (region_id, type_id, day, volume, average, highest, lowest, order_count)
+                    SELECT $forge, type_id, day, volume, average, highest, lowest, order_count FROM daily_history;
+                    DROP TABLE daily_history;
+                    ALTER TABLE daily_history_v2 RENAME TO daily_history;
+                    """;
+                cmd.Parameters.AddWithValue("$forge", TradeHubs.ForgeRegionId);
+                await cmd.ExecuteNonQueryAsync(ct);
             }
         }
 
-        if (!found)
-            await ExecAsync(conn, $"ALTER TABLE {table} ADD COLUMN {column} {type}");
+        if (!await HasColumnAsync(conn, "history_sync", "region_id", ct))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = (SqliteTransaction)tx;
+            cmd.CommandText = """
+                CREATE TABLE history_sync_v2 (
+                    region_id INTEGER NOT NULL,
+                    type_id INTEGER NOT NULL,
+                    synced_on TEXT NOT NULL,
+                    PRIMARY KEY (region_id, type_id)
+                );
+                INSERT INTO history_sync_v2 (region_id, type_id, synced_on)
+                SELECT $forge, type_id, synced_on FROM history_sync;
+                DROP TABLE history_sync;
+                ALTER TABLE history_sync_v2 RENAME TO history_sync;
+                """;
+            cmd.Parameters.AddWithValue("$forge", TradeHubs.ForgeRegionId);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
     }
 
     private static bool InSection(BoardRow row, string section) => section switch
@@ -1881,6 +1973,8 @@ public sealed record LocationQuoteInsert(
     int SellOrders,
     long BuyTouch,
     long SellTouch);
+
+public sealed record HistoryNeed(int RegionId, int TypeId);
 
 public sealed record LocationMetaRow(
     long LocationId,

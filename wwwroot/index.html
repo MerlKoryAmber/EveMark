@@ -861,7 +861,11 @@
         err.textContent = s.lastError;
         el.appendChild(err);
       }
-      document.getElementById("collect").disabled = s.state === "orders";
+      const collectBtn = document.getElementById("collect");
+      const busy = s.state === "orders" || collectWatching;
+      collectBtn.disabled = busy;
+      if (!collectWatching)
+        collectBtn.textContent = s.state === "orders" ? "Снимаем…" : "Снять сейчас";
     }
 
     function renderTable(meta) {
@@ -1252,9 +1256,72 @@
       msg.className = "form-msg";
       await tick();
     });
+    let collectWatching = false;
+    let collectWatchTimer = 0;
+    let collectWatchIdle = 0;
+    function stopCollectWatch() {
+      collectWatching = false;
+      collectWatchIdle = 0;
+      if (collectWatchTimer) {
+        clearInterval(collectWatchTimer);
+        collectWatchTimer = 0;
+      }
+      const btn = document.getElementById("collect");
+      btn.disabled = false;
+      btn.textContent = "Снять сейчас";
+    }
+    function startCollectWatch() {
+      collectWatching = true;
+      collectWatchIdle = 0;
+      const btn = document.getElementById("collect");
+      btn.disabled = true;
+      btn.textContent = "Снимаем…";
+      if (collectWatchTimer) clearInterval(collectWatchTimer);
+      collectWatchTimer = setInterval(async () => {
+        try {
+          const s = await fetch("/api/status").then(r => r.json());
+          renderStatus(s);
+          if (s.state === "orders") {
+            collectWatchIdle = 0;
+            return;
+          }
+          collectWatchIdle += 1;
+          if (collectWatchIdle < 2) return;
+          stopCollectWatch();
+          await tick();
+        } catch { /* следующий тик */ }
+      }, 1500);
+    }
     document.getElementById("collect").addEventListener("click", async () => {
-      await fetch("/api/collect", { method: "POST" });
-      await tick();
+      const btn = document.getElementById("collect");
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = "Снимаем…";
+      const statusEl = document.getElementById("status");
+      statusEl.textContent = "запуск съёма…";
+      try {
+        const resp = await fetch("/api/collect", { method: "POST" });
+        let body = null;
+        try { body = await resp.json(); } catch { /* пусто */ }
+        if (resp.status === 409) {
+          statusEl.textContent = (body && body.error) || "Снятие уже идёт";
+          startCollectWatch();
+          return;
+        }
+        if (!resp.ok) {
+          stopCollectWatch();
+          statusEl.textContent = (body && body.error) || "Не удалось запустить съём";
+          return;
+        }
+        if (body && body.detail)
+          statusEl.textContent = body.detail;
+        startCollectWatch();
+        const s = await fetch("/api/status").then(r => r.json());
+        renderStatus(s);
+      } catch {
+        stopCollectWatch();
+        statusEl.textContent = "Не удалось связаться с программой";
+      }
     });
     fillColMenu(
       document.getElementById("board-cols-menu"),
@@ -1271,6 +1338,7 @@
       ...colHint,
       marginIsk: "Маржа с штуки при мгновенной продаже в скупку на месте назначения. Налог вычтен, брокерской нет.",
       marginFrac: "Мгновенная маржа в процентах от цены покупки.",
+      dailyVolume: "Сколько штук продали вчера по региону конечной станции, не только на ней. Jita и Perimeter — The Forge; Amarr — Domain и т.д.",
       dailyIsk: "Мгновенная маржа с штуки × сколько штук проходит по ордерам."
     };
     document.querySelectorAll("#view-haul tr.cols th").forEach(th => {
