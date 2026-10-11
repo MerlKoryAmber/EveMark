@@ -4,5 +4,5 @@ MK Jitawatch — локальный стол Jita 4-4. Exe: JitaWatch.exe. Ка�
 Каталог: C:\Code\jita-watch
 Живой процесс: publish\JitaWatch.exe, http://127.0.0.1:8741, база publish\data\jita.db
 
-Сейчас: README для человека, релиз. Доска, четыре сигнала, самодостаточный publish. Нет базы — вопрос создать новую. Метод агента: CLAUDE.md. Приёмки нет.
-Хвост: ESI history 400 на type 62593.
+Сейчас: Закуп/Сигнал = Jita+Perimeter. Развоз по хабам (Forge+Amarr+Dodixie+Rens+Hek). Нужен новый снимок. Метод агента: CLAUDE.md. Приёмки нет.
+Хвост: ESI history 400 на type 62593. Структуры Perimeter без SSO не резолвятся.

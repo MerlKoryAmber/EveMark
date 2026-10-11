@@ -140,6 +140,42 @@ internal static class Program
                     default,
                     default),
                 ct));
+        app.MapGet("/api/haul", (
+            MarketDb db,
+            int? page,
+            string? sort,
+            string? dir,
+            string? name,
+            string? marginIskMin,
+            string? marginIskMax,
+            string? marginFracMin,
+            string? marginFracMax,
+            string? unitsMin,
+            string? unitsMax,
+            string? dailyVolumeMin,
+            string? dailyVolumeMax,
+            string? jumpsMin,
+            string? jumpsMax,
+            string? dailyIskMin,
+            string? dailyIskMax,
+            string? fromHub,
+            string? toHub,
+            CancellationToken ct) =>
+            db.GetHaulAsync(
+                page ?? 1,
+                sort,
+                dir,
+                new HaulFilter(
+                    name,
+                    NumRange.Parse(marginIskMin, marginIskMax),
+                    NumRange.Parse(marginFracMin, marginFracMax),
+                    NumRange.Parse(unitsMin, unitsMax),
+                    NumRange.Parse(dailyVolumeMin, dailyVolumeMax),
+                    NumRange.Parse(jumpsMin, jumpsMax),
+                    NumRange.Parse(dailyIskMin, dailyIskMax),
+                    fromHub,
+                    toHub),
+                ct));
         app.MapGet("/api/recommendations", (
             MarketDb db,
             int? page,
@@ -176,6 +212,8 @@ internal static class Program
             string? daysMax,
             string? dailyRoiMin,
             string? dailyRoiMax,
+            bool? jita,
+            bool? perimeter,
             CancellationToken ct) =>
             db.GetBoardAsync(
                 page ?? 1,
@@ -203,6 +241,7 @@ internal static class Program
                     NumRange.Parse(capitalMin, capitalMax),
                     NumRange.Parse(daysMin, daysMax),
                     NumRange.Parse(dailyRoiMin, dailyRoiMax)),
+                BoardSources.Parse(jita, perimeter),
                 ct));
 
         app.Lifetime.ApplicationStarted.Register(TrayContext.OpenPanel);

@@ -81,6 +81,61 @@ public sealed class BoardDto
     public IReadOnlyList<BoardRow> Rows { get; init; } = [];
 }
 
+public sealed record HaulRow
+{
+    public int TypeId { get; init; }
+    public string Name { get; init; } = "";
+    public string FromName { get; init; } = "";
+    public string ToName { get; init; } = "";
+    public long FromLocationId { get; init; }
+    public long ToLocationId { get; init; }
+    public decimal Ask { get; init; }
+    public decimal Bid { get; init; }
+    public decimal MarginIsk { get; init; }
+    public decimal MarginFrac { get; init; }
+    public long Units { get; init; }
+    public long? DailyVolume { get; init; }
+    public decimal? DailyIsk { get; init; }
+    public int Jumps { get; init; }
+    public decimal? VolumeM3 { get; init; }
+    public decimal? CargoM3 { get; init; }
+    public decimal ListSell { get; init; }
+    public decimal ListMarginIsk { get; init; }
+    public decimal ListMarginFrac { get; init; }
+}
+
+public sealed class HaulDto
+{
+    public string? TakenAt { get; init; }
+    public decimal SalesTax { get; init; }
+    public int Shown { get; init; }
+    public int Page { get; init; } = 1;
+    public int PageSize { get; init; } = 200;
+    public int Pages { get; init; } = 1;
+    public IReadOnlyList<HaulRow> Rows { get; init; } = [];
+}
+
+public readonly record struct HaulFilter(
+    string? Name,
+    NumRange MarginIsk,
+    NumRange MarginFrac,
+    NumRange Units,
+    NumRange DailyVolume,
+    NumRange Jumps,
+    NumRange DailyIsk,
+    string? FromHub,
+    string? ToHub);
+
+public readonly record struct BoardSources(bool Jita, bool Perimeter)
+{
+    public static BoardSources Both { get; } = new(true, true);
+
+    public bool Any => Jita || Perimeter;
+
+    public static BoardSources Parse(bool? jita, bool? perimeter) =>
+        new(jita ?? true, perimeter ?? true);
+}
+
 public readonly record struct NumRange(decimal? Min, decimal? Max, bool Bad)
 {
     public static NumRange Parse(string? min, string? max)
@@ -140,6 +195,7 @@ public sealed record ColumnFilter(
 public sealed class MarketDb
 {
     private const decimal MaxBoardMarginPercent = 5000m;
+    private const decimal MinHaulAsk = 500_000m;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path;
 
@@ -204,8 +260,38 @@ public sealed class MarketDb
                     last_error TEXT,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS location_meta (
+                    location_id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    system_id INTEGER NOT NULL,
+                    system_name TEXT NOT NULL,
+                    region_id INTEGER NOT NULL,
+                    hub TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS location_quote (
+                    snapshot_id INTEGER NOT NULL,
+                    type_id INTEGER NOT NULL,
+                    location_id INTEGER NOT NULL,
+                    region_id INTEGER NOT NULL,
+                    best_buy TEXT,
+                    best_sell TEXT NOT NULL,
+                    buy_volume INTEGER NOT NULL,
+                    sell_volume INTEGER NOT NULL,
+                    buy_orders INTEGER NOT NULL,
+                    sell_orders INTEGER NOT NULL,
+                    buy_touch INTEGER NOT NULL DEFAULT 0,
+                    sell_touch INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (snapshot_id, type_id, location_id)
+                );
+                CREATE TABLE IF NOT EXISTS route_cache (
+                    from_system INTEGER NOT NULL,
+                    to_system INTEGER NOT NULL,
+                    jumps INTEGER NOT NULL,
+                    PRIMARY KEY (from_system, to_system)
+                );
                 CREATE INDEX IF NOT EXISTS ix_snapshot_taken ON snapshot(taken_at);
                 CREATE INDEX IF NOT EXISTS ix_quote_type ON quote(type_id, snapshot_id);
+                CREATE INDEX IF NOT EXISTS ix_location_quote_snap ON location_quote(snapshot_id);
                 INSERT INTO status (id, state, detail, updated_at)
                 VALUES (1, 'idle', '', $now)
                 ON CONFLICT(id) DO NOTHING;
@@ -217,6 +303,7 @@ public sealed class MarketDb
                 """, ("$now", Stamp(DateTime.UtcNow)));
             await EnsureColumnAsync(conn, "quote", "buy_touch", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnAsync(conn, "quote", "sell_touch", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnAsync(conn, "type_name", "volume", "TEXT", ct);
         }, ct);
     }
 
@@ -287,7 +374,98 @@ public sealed class MarketDb
             return DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
         }, ct);
 
-    public Task<int> InsertSnapshotAsync(DateTime takenUtc, IReadOnlyList<QuoteInsert> rows, CancellationToken ct = default) =>
+    public Task UpsertLocationsAsync(IReadOnlyList<LocationMetaRow> rows, CancellationToken ct = default) =>
+        WithAsync(async conn =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO location_meta (location_id, name, system_id, system_name, region_id, hub)
+                VALUES ($id, $name, $sys, $sysn, $reg, $hub)
+                ON CONFLICT(location_id) DO UPDATE SET
+                    name = excluded.name,
+                    system_id = excluded.system_id,
+                    system_name = excluded.system_name,
+                    region_id = excluded.region_id,
+                    hub = excluded.hub
+                """;
+            var pId = cmd.Parameters.Add("$id", SqliteType.Integer);
+            var pName = cmd.Parameters.Add("$name", SqliteType.Text);
+            var pSys = cmd.Parameters.Add("$sys", SqliteType.Integer);
+            var pSysn = cmd.Parameters.Add("$sysn", SqliteType.Text);
+            var pReg = cmd.Parameters.Add("$reg", SqliteType.Integer);
+            var pHub = cmd.Parameters.Add("$hub", SqliteType.Text);
+            foreach (var row in rows)
+            {
+                pId.Value = row.LocationId;
+                pName.Value = row.Name;
+                pSys.Value = row.SystemId;
+                pSysn.Value = row.SystemName;
+                pReg.Value = row.RegionId;
+                pHub.Value = row.Hub;
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+        }, ct);
+
+    public Task<int?> GetRouteJumpsAsync(int fromSystem, int toSystem, CancellationToken ct = default) =>
+        WithAsync(async conn =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT jumps FROM route_cache WHERE from_system = $a AND to_system = $b";
+            cmd.Parameters.AddWithValue("$a", fromSystem);
+            cmd.Parameters.AddWithValue("$b", toSystem);
+            var value = await cmd.ExecuteScalarAsync(ct);
+            if (value is null || value is DBNull)
+                return (int?)null;
+            return Convert.ToInt32(value, CultureInfo.InvariantCulture);
+        }, ct);
+
+    public Task SaveRouteJumpsAsync(int fromSystem, int toSystem, int jumps, CancellationToken ct = default) =>
+        WithAsync(conn => ExecAsync(conn, """
+            INSERT INTO route_cache (from_system, to_system, jumps) VALUES ($a, $b, $j)
+            ON CONFLICT(from_system, to_system) DO UPDATE SET jumps = excluded.jumps
+            """,
+            ("$a", fromSystem),
+            ("$b", toSystem),
+            ("$j", jumps)), ct);
+
+    public Task<IReadOnlyList<int>> TypesMissingVolumeAsync(int limit, CancellationToken ct = default) =>
+        WithAsync(async conn =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT DISTINCT type_id FROM (
+                    SELECT type_id FROM type_name
+                    WHERE volume IS NULL OR volume = ''
+                    UNION
+                    SELECT lq.type_id
+                    FROM location_quote lq
+                    LEFT JOIN type_name n ON n.type_id = lq.type_id
+                    WHERE n.type_id IS NULL OR n.volume IS NULL OR n.volume = ''
+                )
+                LIMIT $n
+                """;
+            cmd.Parameters.AddWithValue("$n", limit);
+            var list = new List<int>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                list.Add(ReadInt(reader, 0));
+            return (IReadOnlyList<int>)list;
+        }, ct);
+
+    public Task SaveTypeVolumeAsync(int typeId, decimal volume, CancellationToken ct = default) =>
+        WithAsync(conn => ExecAsync(conn, """
+            INSERT INTO type_name (type_id, name, volume) VALUES ($t, $name, $v)
+            ON CONFLICT(type_id) DO UPDATE SET volume = excluded.volume
+            """,
+            ("$t", typeId),
+            ("$name", "#" + typeId.ToString(CultureInfo.InvariantCulture)),
+            ("$v", Dec(volume))), ct);
+
+    public Task<int> InsertSnapshotAsync(
+        DateTime takenUtc,
+        IReadOnlyList<QuoteInsert> boardRows,
+        IReadOnlyList<LocationQuoteInsert> locationRows,
+        CancellationToken ct = default) =>
         WithAsync(async conn =>
         {
             await using var tx = await conn.BeginTransactionAsync(ct);
@@ -319,7 +497,7 @@ public sealed class MarketDb
             var pBt = quote.Parameters.Add("$bt", SqliteType.Integer);
             var pSt = quote.Parameters.Add("$st", SqliteType.Integer);
             pSid.Value = id;
-            foreach (var row in rows)
+            foreach (var row in boardRows)
             {
                 pType.Value = row.TypeId;
                 pBb.Value = row.BestBuy is null ? DBNull.Value : Dec(row.BestBuy.Value);
@@ -333,6 +511,43 @@ public sealed class MarketDb
                 await quote.ExecuteNonQueryAsync(ct);
             }
 
+            await using var loc = conn.CreateCommand();
+            loc.Transaction = (SqliteTransaction)tx;
+            loc.CommandText = """
+                INSERT INTO location_quote (
+                    snapshot_id, type_id, location_id, region_id, best_buy, best_sell,
+                    buy_volume, sell_volume, buy_orders, sell_orders, buy_touch, sell_touch)
+                VALUES ($sid, $type, $loc, $reg, $bb, $bs, $bv, $sv, $bo, $so, $bt, $st)
+                """;
+            var lSid = loc.Parameters.Add("$sid", SqliteType.Integer);
+            var lType = loc.Parameters.Add("$type", SqliteType.Integer);
+            var lLoc = loc.Parameters.Add("$loc", SqliteType.Integer);
+            var lReg = loc.Parameters.Add("$reg", SqliteType.Integer);
+            var lBb = loc.Parameters.Add("$bb", SqliteType.Text);
+            var lBs = loc.Parameters.Add("$bs", SqliteType.Text);
+            var lBv = loc.Parameters.Add("$bv", SqliteType.Integer);
+            var lSv = loc.Parameters.Add("$sv", SqliteType.Integer);
+            var lBo = loc.Parameters.Add("$bo", SqliteType.Integer);
+            var lSo = loc.Parameters.Add("$so", SqliteType.Integer);
+            var lBt = loc.Parameters.Add("$bt", SqliteType.Integer);
+            var lSt = loc.Parameters.Add("$st", SqliteType.Integer);
+            lSid.Value = id;
+            foreach (var row in locationRows)
+            {
+                lType.Value = row.TypeId;
+                lLoc.Value = row.LocationId;
+                lReg.Value = row.RegionId;
+                lBb.Value = row.BestBuy is null ? DBNull.Value : Dec(row.BestBuy.Value);
+                lBs.Value = Dec(row.BestSell);
+                lBv.Value = row.BuyVolume;
+                lSv.Value = row.SellVolume;
+                lBo.Value = row.BuyOrders;
+                lSo.Value = row.SellOrders;
+                lBt.Value = row.BuyTouch;
+                lSt.Value = row.SellTouch;
+                await loc.ExecuteNonQueryAsync(ct);
+            }
+
             await using var touch = conn.CreateCommand();
             touch.Transaction = (SqliteTransaction)tx;
             touch.CommandText = """
@@ -341,7 +556,7 @@ public sealed class MarketDb
             touch.Parameters.AddWithValue("$t", Stamp(takenUtc));
             await touch.ExecuteNonQueryAsync(ct);
             await tx.CommitAsync(ct);
-            return rows.Count;
+            return boardRows.Count;
         }, ct);
 
     public Task<IReadOnlyList<int>> LatestTypeIdsAsync(CancellationToken ct = default) =>
@@ -591,6 +806,7 @@ public sealed class MarketDb
             var cut = Stamp(DateTime.UtcNow.AddDays(-days));
             var day = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             await ExecAsync(conn, """
+                DELETE FROM location_quote WHERE snapshot_id IN (SELECT id FROM snapshot WHERE taken_at < $cut);
                 DELETE FROM quote WHERE snapshot_id IN (SELECT id FROM snapshot WHERE taken_at < $cut);
                 DELETE FROM snapshot WHERE taken_at < $cut;
                 DELETE FROM daily_history WHERE day < $day;
@@ -677,10 +893,256 @@ public sealed class MarketDb
             };
         }, ct);
 
-    public Task<BoardDto> GetBoardAsync(int page, string? sort, string? dir, ColumnFilter filter, CancellationToken ct = default) =>
+    public Task<HaulDto> GetHaulAsync(int page, string? sort, string? dir, HaulFilter filter, CancellationToken ct = default) =>
         WithAsync(async conn =>
         {
-            var load = await LoadRankedAsync(conn, ct);
+            var fees = await ReadSettingsAsync(conn);
+            await using var latest = conn.CreateCommand();
+            latest.CommandText = "SELECT id, taken_at FROM snapshot ORDER BY taken_at DESC LIMIT 1";
+            await using var latestReader = await latest.ExecuteReaderAsync(ct);
+            if (!await latestReader.ReadAsync(ct))
+                return new HaulDto { SalesTax = fees.SalesTax };
+
+            var snapshotId = latestReader.GetInt64(0);
+            var takenAt = latestReader.GetString(1);
+            await latestReader.DisposeAsync();
+
+            var metas = new Dictionary<long, LocationMetaRow>();
+            await using var metaCmd = conn.CreateCommand();
+            metaCmd.CommandText = "SELECT location_id, name, system_id, system_name, region_id, hub FROM location_meta";
+            await using (var metaReader = await metaCmd.ExecuteReaderAsync(ct))
+            {
+                while (await metaReader.ReadAsync(ct))
+                {
+                    var id = metaReader.GetInt64(0);
+                    metas[id] = new LocationMetaRow(
+                        id,
+                        metaReader.GetString(1),
+                        metaReader.GetInt32(2),
+                        metaReader.GetString(3),
+                        metaReader.GetInt32(4),
+                        metaReader.GetString(5));
+                }
+            }
+
+            var routes = new Dictionary<(int, int), int>();
+            await using var routeCmd = conn.CreateCommand();
+            routeCmd.CommandText = "SELECT from_system, to_system, jumps FROM route_cache";
+            await using (var routeReader = await routeCmd.ExecuteReaderAsync(ct))
+            {
+                while (await routeReader.ReadAsync(ct))
+                    routes[(routeReader.GetInt32(0), routeReader.GetInt32(1))] = routeReader.GetInt32(2);
+            }
+
+            var volumes = new Dictionary<int, decimal>();
+            var names = new Dictionary<int, string>();
+            await using var nameCmd = conn.CreateCommand();
+            nameCmd.CommandText = "SELECT type_id, name, volume FROM type_name";
+            await using (var nameReader = await nameCmd.ExecuteReaderAsync(ct))
+            {
+                while (await nameReader.ReadAsync(ct))
+                {
+                    var typeId = ReadInt(nameReader, 0);
+                    names[typeId] = nameReader.GetString(1);
+                    if (!nameReader.IsDBNull(2) && decimal.TryParse(nameReader.GetString(2), NumberStyles.Any, CultureInfo.InvariantCulture, out var vol))
+                        volumes[typeId] = vol;
+                }
+            }
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var dayVolume = new Dictionary<int, long>();
+            await using (var histCmd = conn.CreateCommand())
+            {
+                histCmd.CommandText = """
+                    SELECT h.type_id, h.day, h.volume
+                    FROM daily_history h
+                    JOIN (
+                        SELECT type_id, MAX(day) AS day
+                        FROM daily_history
+                        WHERE day < $today
+                        GROUP BY type_id
+                    ) m ON m.type_id = h.type_id AND m.day = h.day
+                    """;
+                histCmd.Parameters.AddWithValue("$today", today);
+                await using var histReader = await histCmd.ExecuteReaderAsync(ct);
+                while (await histReader.ReadAsync(ct))
+                {
+                    if (histReader.GetString(1) == yesterday)
+                        dayVolume[ReadInt(histReader, 0)] = ReadLong(histReader, 2);
+                }
+            }
+
+            var rejected = new HashSet<int>();
+            await using var rej = conn.CreateCommand();
+            rej.CommandText = "SELECT type_id FROM reject";
+            await using (var rejReader = await rej.ExecuteReaderAsync(ct))
+            {
+                while (await rejReader.ReadAsync(ct))
+                    rejected.Add(ReadInt(rejReader, 0));
+            }
+
+            var byType = new Dictionary<int, List<LocBook>>();
+            await using var q = conn.CreateCommand();
+            q.CommandText = """
+                SELECT type_id, location_id, best_buy, best_sell, buy_volume, sell_volume, buy_touch, sell_touch
+                FROM location_quote WHERE snapshot_id = $sid
+                """;
+            q.Parameters.AddWithValue("$sid", snapshotId);
+            await using (var reader = await q.ExecuteReaderAsync(ct))
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    var typeId = ReadInt(reader, 0);
+                    if (rejected.Contains(typeId))
+                        continue;
+                    var locationId = reader.GetInt64(1);
+                    if (!metas.ContainsKey(locationId))
+                        continue;
+                    if (!byType.TryGetValue(typeId, out var list))
+                    {
+                        list = [];
+                        byType[typeId] = list;
+                    }
+
+                    list.Add(new LocBook(
+                        locationId,
+                        reader.IsDBNull(2) ? null : ReadDec(reader, 2),
+                        ReadDec(reader, 3),
+                        ReadLong(reader, 4),
+                        ReadLong(reader, 5),
+                        ReadLong(reader, 6),
+                        ReadLong(reader, 7)));
+                }
+            }
+
+            var rows = new List<HaulRow>();
+            foreach (var (typeId, spots) in byType)
+            {
+                for (var i = 0; i < spots.Count; i++)
+                {
+                    var from = spots[i];
+                    if (from.SellVolume < 1 || from.BestSell < MinHaulAsk)
+                        continue;
+                    for (var j = 0; j < spots.Count; j++)
+                    {
+                        if (i == j)
+                            continue;
+                        var to = spots[j];
+                        if (to.BestBuy is not decimal bid || bid <= 0 || to.BuyVolume < 1)
+                            continue;
+                        var (margin, frac) = FeeMath.InstantHaul(from.BestSell, bid, fees.SalesTax);
+                        if (margin <= 0)
+                            continue;
+                        var listSell = to.BestSell;
+                        var (listMargin, listFrac) = FeeMath.HaulAndList(
+                            from.BestSell, listSell, fees.SalesTax, fees.BrokerFee);
+                        var fromMeta = metas[from.LocationId];
+                        var toMeta = metas[to.LocationId];
+                        if (!string.IsNullOrWhiteSpace(filter.FromHub)
+                            && !string.Equals(fromMeta.Hub, filter.FromHub, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (!string.IsNullOrWhiteSpace(filter.ToHub)
+                            && !string.Equals(toMeta.Hub, filter.ToHub, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (!routes.TryGetValue((fromMeta.SystemId, toMeta.SystemId), out var jumps))
+                            jumps = fromMeta.SystemId == toMeta.SystemId ? 0 : 99;
+                        var sellDepth = from.SellTouch > 0 ? from.SellTouch : from.SellVolume;
+                        var buyDepth = to.BuyTouch > 0 ? to.BuyTouch : to.BuyVolume;
+                        var units = Math.Min(sellDepth, buyDepth);
+                        if (units < 1)
+                            continue;
+                        volumes.TryGetValue(typeId, out var m3);
+                        dayVolume.TryGetValue(typeId, out var traded);
+                        var row = new HaulRow
+                        {
+                            TypeId = typeId,
+                            Name = names.GetValueOrDefault(typeId, typeId.ToString(CultureInfo.InvariantCulture)),
+                            FromName = fromMeta.Name,
+                            ToName = toMeta.Name,
+                            FromLocationId = from.LocationId,
+                            ToLocationId = to.LocationId,
+                            Ask = from.BestSell,
+                            Bid = bid,
+                            MarginIsk = margin,
+                            MarginFrac = frac,
+                            Units = units,
+                            DailyVolume = traded > 0 ? traded : null,
+                            DailyIsk = margin * units,
+                            Jumps = jumps,
+                            VolumeM3 = m3 > 0 ? m3 : null,
+                            CargoM3 = m3 > 0 ? m3 * units : null,
+                            ListSell = listSell,
+                            ListMarginIsk = listMargin,
+                            ListMarginFrac = listFrac
+                        };
+                        if (!Hits(filter.Name, row.Name)
+                            || !filter.MarginIsk.Fits(row.MarginIsk)
+                            || !filter.MarginFrac.Fits(row.MarginFrac * 100m)
+                            || !filter.Units.Fits(row.Units)
+                            || !filter.DailyVolume.Fits(row.DailyVolume)
+                            || !filter.Jumps.Fits(row.Jumps)
+                            || !filter.DailyIsk.Fits(row.DailyIsk))
+                            continue;
+                        rows.Add(row);
+                    }
+                }
+            }
+
+            var sortKey = sort switch
+            {
+                "name" or "fromName" or "toName" or "ask" or "bid" or "marginIsk" or "marginFrac"
+                    or "units" or "dailyVolume" or "dailyIsk" or "jumps" or "volumeM3" or "cargoM3"
+                    or "listSell" or "listMarginIsk" or "listMarginFrac" => sort,
+                _ => "dailyIsk"
+            };
+            var descending = !string.Equals(dir, "asc", StringComparison.OrdinalIgnoreCase);
+            rows.Sort((a, b) =>
+            {
+                var cmp = sortKey switch
+                {
+                    "name" => CompareName(a.Name, b.Name),
+                    "fromName" => CompareName(a.FromName, b.FromName),
+                    "toName" => CompareName(a.ToName, b.ToName),
+                    "ask" => a.Ask.CompareTo(b.Ask),
+                    "bid" => a.Bid.CompareTo(b.Bid),
+                    "marginIsk" => a.MarginIsk.CompareTo(b.MarginIsk),
+                    "marginFrac" => a.MarginFrac.CompareTo(b.MarginFrac),
+                    "units" => a.Units.CompareTo(b.Units),
+                    "dailyVolume" => Nullable.Compare(a.DailyVolume, b.DailyVolume),
+                    "jumps" => a.Jumps.CompareTo(b.Jumps),
+                    "volumeM3" => Nullable.Compare(a.VolumeM3, b.VolumeM3),
+                    "cargoM3" => Nullable.Compare(a.CargoM3, b.CargoM3),
+                    "listSell" => a.ListSell.CompareTo(b.ListSell),
+                    "listMarginIsk" => a.ListMarginIsk.CompareTo(b.ListMarginIsk),
+                    "listMarginFrac" => a.ListMarginFrac.CompareTo(b.ListMarginFrac),
+                    _ => Nullable.Compare(a.DailyIsk, b.DailyIsk)
+                };
+                if (cmp == 0)
+                    cmp = CompareName(a.Name, b.Name);
+                return descending ? -cmp : cmp;
+            });
+
+            const int pageSize = 200;
+            var pages = Math.Max(1, (int)Math.Ceiling(rows.Count / (double)pageSize));
+            var current = Math.Clamp(page, 1, pages);
+            return new HaulDto
+            {
+                TakenAt = takenAt,
+                SalesTax = fees.SalesTax,
+                Shown = rows.Count,
+                Page = current,
+                PageSize = pageSize,
+                Pages = rows.Count == 0 ? 1 : pages,
+                Rows = rows.Skip((current - 1) * pageSize).Take(pageSize).ToList()
+            };
+        }, ct);
+
+    public Task<BoardDto> GetBoardAsync(
+        int page, string? sort, string? dir, ColumnFilter filter, BoardSources sources, CancellationToken ct = default) =>
+        WithAsync(async conn =>
+        {
+            var load = await LoadRankedAsync(conn, sources, ct);
             var fees = load.Fees;
             var ranked = load.Rows;
             if (load.TakenAt is null)
@@ -729,7 +1191,10 @@ public sealed class MarketDb
             };
         }, ct);
 
-    private async Task<RankedLoad> LoadRankedAsync(SqliteConnection conn, CancellationToken ct)
+    private async Task<RankedLoad> LoadRankedAsync(SqliteConnection conn, CancellationToken ct) =>
+        await LoadRankedAsync(conn, BoardSources.Both, ct);
+
+    private async Task<RankedLoad> LoadRankedAsync(SqliteConnection conn, BoardSources sources, CancellationToken ct)
     {
         var fees = await ReadSettingsAsync(conn);
         await using var countCmd = conn.CreateCommand();
@@ -746,35 +1211,9 @@ public sealed class MarketDb
         var takenAt = latestReader.GetString(1);
         await latestReader.DisposeAsync();
 
-        var raw = new List<RawQuote>();
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = """
-                SELECT q.type_id, IFNULL(n.name, '#' || q.type_id), q.best_buy, q.best_sell,
-                       q.buy_volume, q.sell_volume, q.buy_orders, q.sell_orders, q.buy_touch, q.sell_touch
-                FROM quote q
-                LEFT JOIN type_name n ON n.type_id = q.type_id
-                WHERE q.snapshot_id = $id
-                  AND q.type_id NOT IN (SELECT type_id FROM reject)
-                  AND IFNULL(n.name, '') NOT LIKE '% SKIN'
-                """;
-            cmd.Parameters.AddWithValue("$id", snapshotId);
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                raw.Add(new RawQuote(
-                    ReadInt(reader, 0),
-                    reader.GetString(1),
-                    reader.IsDBNull(2) ? null : ReadDec(reader, 2),
-                    ReadDec(reader, 3),
-                    ReadLong(reader, 4),
-                    ReadLong(reader, 5),
-                    ReadInt(reader, 6),
-                    ReadInt(reader, 7),
-                    ReadLong(reader, 8),
-                    ReadLong(reader, 9)));
-            }
-        }
+        var raw = sources.Any
+            ? await LoadBoardQuotesAsync(conn, snapshotId, sources, ct)
+            : [];
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -839,6 +1278,138 @@ public sealed class MarketDb
         }
 
         return new RankedLoad(fees, takenAt, raw.Count, snapshots, ranked);
+    }
+
+    private static async Task<List<RawQuote>> LoadBoardQuotesAsync(
+        SqliteConnection conn, long snapshotId, BoardSources sources, CancellationToken ct)
+    {
+        await using var probe = conn.CreateCommand();
+        probe.CommandText = "SELECT COUNT(*) FROM location_quote WHERE snapshot_id = $id";
+        probe.Parameters.AddWithValue("$id", snapshotId);
+        var locCount = Convert.ToInt32(await probe.ExecuteScalarAsync(ct) ?? 0, CultureInfo.InvariantCulture);
+        if (locCount == 0)
+        {
+            // Старый снимок без разбивки по локациям — только полная доска.
+            if (!sources.Jita || !sources.Perimeter)
+                return [];
+            return await LoadMergedQuoteTableAsync(conn, snapshotId, ct);
+        }
+
+        var merge = new Dictionary<int, (string Name, BoardAcc Acc)>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT lq.type_id, IFNULL(n.name, '#' || lq.type_id), lq.best_buy, lq.best_sell,
+                   lq.buy_volume, lq.sell_volume, lq.buy_orders, lq.sell_orders, lq.buy_touch, lq.sell_touch
+            FROM location_quote lq
+            JOIN location_meta m ON m.location_id = lq.location_id
+            LEFT JOIN type_name n ON n.type_id = lq.type_id
+            WHERE lq.snapshot_id = $id
+              AND (
+                    ($jita = 1 AND m.hub = 'jita')
+                 OR ($peri = 1 AND m.hub = 'perimeter')
+              )
+              AND lq.type_id NOT IN (SELECT type_id FROM reject)
+              AND IFNULL(n.name, '') NOT LIKE '% SKIN'
+            """;
+        cmd.Parameters.AddWithValue("$id", snapshotId);
+        cmd.Parameters.AddWithValue("$jita", sources.Jita ? 1 : 0);
+        cmd.Parameters.AddWithValue("$peri", sources.Perimeter ? 1 : 0);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var typeId = ReadInt(reader, 0);
+            var name = reader.GetString(1);
+            if (!merge.TryGetValue(typeId, out var entry))
+            {
+                entry = (name, new BoardAcc());
+                merge[typeId] = entry;
+            }
+
+            entry.Acc.Add(
+                reader.IsDBNull(2) ? null : ReadDec(reader, 2),
+                ReadDec(reader, 3),
+                ReadLong(reader, 4),
+                ReadLong(reader, 5),
+                ReadInt(reader, 6),
+                ReadInt(reader, 7),
+                ReadLong(reader, 8),
+                ReadLong(reader, 9));
+        }
+
+        return merge
+            .Where(kv => kv.Value.Acc.HasSell)
+            .Select(kv => kv.Value.Acc.ToRaw(kv.Key, kv.Value.Name))
+            .ToList();
+    }
+
+    private static async Task<List<RawQuote>> LoadMergedQuoteTableAsync(
+        SqliteConnection conn, long snapshotId, CancellationToken ct)
+    {
+        var raw = new List<RawQuote>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT q.type_id, IFNULL(n.name, '#' || q.type_id), q.best_buy, q.best_sell,
+                   q.buy_volume, q.sell_volume, q.buy_orders, q.sell_orders, q.buy_touch, q.sell_touch
+            FROM quote q
+            LEFT JOIN type_name n ON n.type_id = q.type_id
+            WHERE q.snapshot_id = $id
+              AND q.type_id NOT IN (SELECT type_id FROM reject)
+              AND IFNULL(n.name, '') NOT LIKE '% SKIN'
+            """;
+        cmd.Parameters.AddWithValue("$id", snapshotId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            raw.Add(new RawQuote(
+                ReadInt(reader, 0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : ReadDec(reader, 2),
+                ReadDec(reader, 3),
+                ReadLong(reader, 4),
+                ReadLong(reader, 5),
+                ReadInt(reader, 6),
+                ReadInt(reader, 7),
+                ReadLong(reader, 8),
+                ReadLong(reader, 9)));
+        }
+
+        return raw;
+    }
+
+    private sealed class BoardAcc
+    {
+        public decimal? BestBuy { get; private set; }
+        public decimal BestSell { get; private set; }
+        public bool HasSell { get; private set; }
+        public long BuyVolume { get; private set; }
+        public long SellVolume { get; private set; }
+        public int BuyOrders { get; private set; }
+        public int SellOrders { get; private set; }
+        public long BuyTouch { get; private set; }
+        public long SellTouch { get; private set; }
+
+        public void Add(
+            decimal? bestBuy, decimal bestSell, long buyVolume, long sellVolume,
+            int buyOrders, int sellOrders, long buyTouch, long sellTouch)
+        {
+            if (bestBuy is decimal buy && (BestBuy is null || buy > BestBuy))
+                BestBuy = buy;
+            if (!HasSell || bestSell < BestSell)
+            {
+                BestSell = bestSell;
+                HasSell = true;
+            }
+
+            BuyVolume += buyVolume;
+            SellVolume += sellVolume;
+            BuyOrders += buyOrders;
+            SellOrders += sellOrders;
+            BuyTouch += buyTouch;
+            SellTouch += sellTouch;
+        }
+
+        public RawQuote ToRaw(int typeId, string name) =>
+            new(typeId, name, BestBuy, BestSell, BuyVolume, SellVolume, BuyOrders, SellOrders, BuyTouch, SellTouch);
     }
 
     private sealed record RankedLoad(FeeSettings Fees, string? TakenAt, int Tracked, int Snapshots, List<BoardRow> Rows);
@@ -1276,6 +1847,15 @@ public sealed class MarketDb
     private sealed record Hist(string Day, long Volume, decimal Average);
 
     private readonly record struct Point(DateTime Time, decimal Buy, decimal Sell, long BuyVolume, long SellVolume);
+
+    private sealed record LocBook(
+        long LocationId,
+        decimal? BestBuy,
+        decimal BestSell,
+        long BuyVolume,
+        long SellVolume,
+        long BuyTouch,
+        long SellTouch);
 }
 
 public sealed record QuoteInsert(
@@ -1288,3 +1868,24 @@ public sealed record QuoteInsert(
     int SellOrders,
     long BuyTouch,
     long SellTouch);
+
+public sealed record LocationQuoteInsert(
+    int TypeId,
+    long LocationId,
+    int RegionId,
+    decimal? BestBuy,
+    decimal BestSell,
+    long BuyVolume,
+    long SellVolume,
+    int BuyOrders,
+    int SellOrders,
+    long BuyTouch,
+    long SellTouch);
+
+public sealed record LocationMetaRow(
+    long LocationId,
+    string Name,
+    int SystemId,
+    string SystemName,
+    int RegionId,
+    string Hub);

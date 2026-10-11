@@ -32,6 +32,24 @@ public static class FeeMath
         return (margin, fraction);
     }
 
+    /// <summary>Мгновенный развоз: купить чужой sell, продать в чужой buy. Брокерская не берётся.</summary>
+    public static (decimal Margin, decimal Fraction) InstantHaul(decimal ask, decimal bid, decimal salesTax)
+    {
+        var margin = bid * (1m - salesTax) - ask;
+        var fraction = ask == 0 ? 0 : margin / ask;
+        return (margin, fraction);
+    }
+
+    /// <summary>Купили по ask, на месте назначения выставили sell. Брокерская и налог с продажи.</summary>
+    public static (decimal Margin, decimal Fraction) HaulAndList(
+        decimal ask, decimal listSell, decimal salesTax, decimal brokerFee)
+    {
+        var proceeds = listSell * (1m - brokerFee - salesTax);
+        var margin = proceeds - ask;
+        var fraction = ask == 0 ? 0 : margin / ask;
+        return (margin, fraction);
+    }
+
     public static int Relists(decimal margin, decimal sell, decimal brokerFee)
     {
         var fee = RelistRate(brokerFee) * sell;

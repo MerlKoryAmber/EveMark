@@ -96,13 +96,13 @@ public sealed class EsiClient
         _log = log;
     }
 
-    public async Task<Dictionary<int, Book>> FetchStationBooksAsync(
+    public async Task<RegionOrderScan> FetchRegionBooksAsync(
         int regionId,
-        long locationId,
+        string regionLabel,
         Action<string> progress,
         CancellationToken ct)
     {
-        var books = new Dictionary<int, Book>();
+        var byLocation = new Dictionary<long, Dictionary<int, Book>>();
         var page = 1;
         var pages = 1;
         do
@@ -119,8 +119,13 @@ public sealed class EsiClient
             var orders = await resp.Content.ReadFromJsonAsync<List<OrderDto>>(cancellationToken: ct) ?? [];
             foreach (var order in orders)
             {
-                if (order.LocationId != locationId || order.VolumeRemain <= 0 || order.Price <= 0)
+                if (order.VolumeRemain <= 0 || order.Price <= 0 || order.LocationId <= 0)
                     continue;
+                if (!byLocation.TryGetValue(order.LocationId, out var books))
+                {
+                    books = new Dictionary<int, Book>();
+                    byLocation[order.LocationId] = books;
+                }
 
                 if (!books.TryGetValue(order.TypeId, out var book))
                 {
@@ -131,16 +136,72 @@ public sealed class EsiClient
                 book.Add(order.IsBuyOrder, order.Price, order.VolumeRemain);
             }
 
-            progress($"ордера, страница {page} из {pages}");
+            progress($"{regionLabel}, страница {page} из {pages}");
             page++;
         }
         while (page <= pages);
 
-        foreach (var book in books.Values)
-            book.Finish();
+        foreach (var books in byLocation.Values)
+        {
+            foreach (var book in books.Values)
+                book.Finish();
+        }
 
-        _log.LogInformation("Ордера The Forge разобраны, типов на станции: {Count}", books.Count);
-        return books;
+        _log.LogInformation("Ордера {Region}: локаций {Loc}, типов {Types}",
+            regionLabel, byLocation.Count, byLocation.Sum(kv => kv.Value.Count));
+        return new RegionOrderScan(regionId, byLocation);
+    }
+
+    public async Task<StationInfo?> FetchStationAsync(long stationId, CancellationToken ct)
+    {
+        if (stationId <= 0 || stationId > int.MaxValue)
+            return null;
+        var url =
+            $"https://esi.evetech.net/latest/universe/stations/{stationId.ToString(CultureInfo.InvariantCulture)}/?datasource=tranquility";
+        using var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        if (!resp.IsSuccessStatusCode)
+        {
+            await PauseIfNeededAsync(resp, ct);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+        }
+
+        await PauseIfNeededAsync(resp, ct);
+        var dto = await resp.Content.ReadFromJsonAsync<StationDto>(cancellationToken: ct);
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Name) || dto.SystemId <= 0)
+            return null;
+        return new StationInfo(stationId, dto.Name, dto.SystemId);
+    }
+
+    public async Task<int> FetchRouteJumpsAsync(int fromSystemId, int toSystemId, CancellationToken ct)
+    {
+        if (fromSystemId == toSystemId)
+            return 0;
+        var url =
+            $"https://esi.evetech.net/latest/route/{fromSystemId.ToString(CultureInfo.InvariantCulture)}/{toSystemId.ToString(CultureInfo.InvariantCulture)}/?datasource=tranquility&flag=shortest";
+        using var resp = await SendAsync(url, ct);
+        var systems = await resp.Content.ReadFromJsonAsync<List<int>>(cancellationToken: ct) ?? [];
+        return Math.Max(0, systems.Count - 1);
+    }
+
+    public async Task<decimal?> FetchTypeVolumeAsync(int typeId, CancellationToken ct)
+    {
+        var url =
+            $"https://esi.evetech.net/latest/universe/types/{typeId.ToString(CultureInfo.InvariantCulture)}/?datasource=tranquility";
+        using var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        if (!resp.IsSuccessStatusCode)
+        {
+            await PauseIfNeededAsync(resp, ct);
+            resp.EnsureSuccessStatusCode();
+        }
+
+        await PauseIfNeededAsync(resp, ct);
+        var dto = await resp.Content.ReadFromJsonAsync<TypeDto>(cancellationToken: ct);
+        return dto?.PackagedVolume ?? dto?.VolumeRaw;
     }
 
     public async Task<Dictionary<int, string>> FetchNamesAsync(IReadOnlyList<int> typeIds, CancellationToken ct)
@@ -217,10 +278,13 @@ public sealed class EsiClient
         return await resp.Content.ReadFromJsonAsync<List<HistoryBar>>(cancellationToken: ct) ?? [];
     }
 
-    private async Task<HttpResponseMessage> PostNamesAsync(IReadOnlyList<int> typeIds, CancellationToken ct)
+    private Task<HttpResponseMessage> PostNamesAsync(IReadOnlyList<int> typeIds, CancellationToken ct) =>
+        PostIdsAsync(typeIds.Select(id => (long)id).ToArray(), ct);
+
+    private async Task<HttpResponseMessage> PostIdsAsync(IReadOnlyList<long> ids, CancellationToken ct)
     {
         var url = "https://esi.evetech.net/latest/universe/names/?datasource=tranquility";
-        var json = System.Text.Json.JsonSerializer.Serialize(typeIds);
+        var json = System.Text.Json.JsonSerializer.Serialize(ids);
         for (var attempt = 1; ; attempt++)
         {
             using var body = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
@@ -233,8 +297,8 @@ public sealed class EsiClient
                 continue;
             }
 
-            resp.EnsureSuccessStatusCode();
-            await PauseIfNeededAsync(resp, ct);
+            if (resp.IsSuccessStatusCode)
+                await PauseIfNeededAsync(resp, ct);
             return resp;
         }
     }
@@ -300,5 +364,25 @@ public sealed class EsiClient
     {
         [JsonPropertyName("name")]
         public string? Name { get; set; }
+
+        [JsonPropertyName("packaged_volume")]
+        public decimal? PackagedVolume { get; set; }
+
+        [JsonPropertyName("volume")]
+        public decimal? VolumeRaw { get; set; }
+    }
+
+    private sealed class StationDto
+    {
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("system_id")]
+        public int SystemId { get; set; }
     }
 }
+
+public sealed record RegionOrderScan(int RegionId, Dictionary<long, Dictionary<int, Book>> ByLocation);
+
+public sealed record StationInfo(long StationId, string Name, int SystemId);
+

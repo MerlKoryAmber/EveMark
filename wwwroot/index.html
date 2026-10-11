@@ -214,6 +214,21 @@
       cursor: pointer;
     }
     .col-off { display: none; }
+    .src-toggles {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.88rem;
+      color: var(--ir-text-secondary);
+    }
+    .src-toggles label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .src-toggles input { accent-color: var(--ir-accent); }
     .work {
       flex: 1 1 0%;
       min-width: 0;
@@ -305,6 +320,8 @@
     th.money .col-filter { min-width: 8rem; }
     th.pct .col-filter { min-width: 4.5rem; }
     th.compact .col-filter { min-width: 5.5rem; }
+    th.thin .col-filter { min-width: 3.2rem; max-width: 4.2rem; }
+    th.thin, td.thin { width: 1%; padding-left: 6px; padding-right: 6px; }
     th.name .col-filter { min-width: 8rem; }
     .col-filter:focus { outline: none; border-color: var(--ir-accent); }
     .pager {
@@ -385,9 +402,10 @@
       <nav class="sidebar-nav">
         <button class="nav-item active" type="button" data-view="board">Закуп</button>
         <button class="nav-item" type="button" data-view="signal">Сигнал</button>
+        <button class="nav-item" type="button" data-view="haul">Развоз</button>
         <button class="nav-item" type="button" data-view="fees">Настройки</button>
       </nav>
-      <div class="sidebar-foot">Jita 4-4 · снимок раз в час</div>
+      <div class="sidebar-foot">Jita + Perimeter · хабы · снимок раз в час</div>
     </aside>
     <div class="main">
       <header class="topbar">
@@ -402,6 +420,10 @@
           <div class="col-picker" id="board-picker">
             <button id="board-cols" class="btn btn-secondary" type="button">Столбцы</button>
             <div class="col-menu" id="board-cols-menu" hidden></div>
+          </div>
+          <div class="src-toggles" title="Какие рынки входят в доску закупа">
+            <label><input id="src-jita" type="checkbox" checked> Jita</label>
+            <label><input id="src-perimeter" type="checkbox" checked> Perimeter</label>
           </div>
           <span class="toolbar-hint" id="rates"></span>
         </div>
@@ -512,6 +534,67 @@
         </div>
       </section>
 
+      <section class="view" id="view-haul" hidden>
+        <div class="toolbar">
+          <div class="col-picker" id="haul-picker">
+            <button id="haul-cols" class="btn btn-secondary" type="button">Столбцы</button>
+            <div class="col-menu" id="haul-cols-menu" hidden></div>
+          </div>
+          <span class="toolbar-hint" id="haul-hint">Купить чужой sell от 500 тыс., отвезти. Мгновенно — в чужой buy (без брокерской). Либо выставить свой sell на месте назначения.</span>
+        </div>
+        <div class="work">
+          <div class="table-wrap">
+            <div class="table-scroll">
+              <table class="data" id="haul-table">
+                <thead>
+                  <tr class="cols">
+                    <th class="left" data-k="name">Предмет</th>
+                    <th class="left" data-k="fromName">Откуда</th>
+                    <th class="left" data-k="toName">Куда</th>
+                    <th data-k="ask">Покупка</th>
+                    <th data-k="bid">В скупку</th>
+                    <th data-k="marginIsk">Маржа</th>
+                    <th data-k="marginFrac">%</th>
+                    <th data-k="listSell">Выставить</th>
+                    <th data-k="listMarginIsk">Маржа выст.</th>
+                    <th data-k="listMarginFrac">% выст.</th>
+                    <th class="thin" data-k="units">Шт</th>
+                    <th data-k="dailyVolume">Объём/сутки</th>
+                    <th class="sorted" data-k="dailyIsk">Оценка</th>
+                    <th data-k="jumps">Прыжков</th>
+                    <th data-k="volumeM3">м³/шт</th>
+                  </tr>
+                  <tr class="filters">
+                    <th class="left name"><input class="col-filter" data-f="name" type="search" aria-label="Предмет"></th>
+                    <th class="left name"><input class="col-filter" data-f="fromHub" type="search" placeholder="jita / perimeter…" aria-label="Откуда хаб"></th>
+                    <th class="left name"><input class="col-filter" data-f="toHub" type="search" placeholder="amarr / rens…" aria-label="Куда хаб"></th>
+                    <th class="money"></th>
+                    <th class="money"></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="marginIskMin" data-g="1" type="search" placeholder="от" aria-label="Маржа от"><input class="col-filter" data-f="marginIskMax" data-g="1" type="search" placeholder="до" aria-label="Маржа до"></span></th>
+                    <th class="pct"><span class="range"><input class="col-filter" data-f="marginFracMin" type="search" placeholder="от" aria-label="Процент от"><input class="col-filter" data-f="marginFracMax" type="search" placeholder="до" aria-label="Процент до"></span></th>
+                    <th class="money"></th>
+                    <th class="money"></th>
+                    <th class="pct"></th>
+                    <th class="thin"><span class="range"><input class="col-filter" data-f="unitsMin" data-g="1" type="search" placeholder="от" aria-label="Штук от"><input class="col-filter" data-f="unitsMax" data-g="1" type="search" placeholder="до" aria-label="Штук до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="dailyVolumeMin" data-g="1" type="search" placeholder="от" aria-label="Объём от"><input class="col-filter" data-f="dailyVolumeMax" data-g="1" type="search" placeholder="до" aria-label="Объём до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="dailyIskMin" data-g="1" type="search" placeholder="от" aria-label="Оценка от"><input class="col-filter" data-f="dailyIskMax" data-g="1" type="search" placeholder="до" aria-label="Оценка до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="jumpsMin" data-g="1" type="search" placeholder="от" aria-label="Прыжков от"><input class="col-filter" data-f="jumpsMax" data-g="1" type="search" placeholder="до" aria-label="Прыжков до"></span></th>
+                    <th class="compact"></th>
+                  </tr>
+                </thead>
+                <tbody id="haul-body"></tbody>
+              </table>
+              <div class="empty" id="haul-empty" hidden>Пока нет выгодных связок. Нужен свежий снимок по хабам.</div>
+            </div>
+          </div>
+          <div class="pager">
+            <button id="haul-prev" class="btn btn-secondary" type="button">←</button>
+            <span id="haul-page-label">страница 1 из 1</span>
+            <button id="haul-next" class="btn btn-secondary" type="button">→</button>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-fees" hidden>
         <div class="toolbar">
           <button id="save" class="btn" type="button">Сохранить</button>
@@ -523,6 +606,7 @@
             <p>
               Accounting снижает налог с продажи от 7,5%. Broker Relations и стендинг к владельцу станции снижают брокерскую, пол — 1%.
               Маржа считает постановку buy и sell: брокерская с обеих сторон, налог только с продажи. Перестановка ордера не входит.
+              Закуп и сигнал собирают Jita 4-4 и структуры Perimeter. Развоз смотрит ещё Amarr, Dodixie, Rens и Hek: купить чужой sell, отвезти, продать в чужой buy; брокерская не входит, налог с продажи — да.
               Объём — продажи вчера по The Forge. День старше вчерашнего в этот столбец не входит. «На покупке» и «На продаже» — объём и число ордеров в пределах 1% от лучшей цены на своей стороне. Оценка — маржа с единицы, умноженная на меньшее из вчерашнего объёма и этих двух полос. Таблица по 200 строк, дальше стрелки внизу. У цифр два поля друг под другом: «от» и «до», пустое не ограничивает. Процент вводится как в столбце. «На покупке» и «На продаже» фильтруют штуки, не число ордеров.
               «Часов» — сколько последних снимков подряд маржа была плюсовой; разрыв больше 90 минут обрывает ряд.
             </p>
@@ -563,14 +647,19 @@
     const isk = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
     const iskWhole = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
     const pct = new Intl.NumberFormat("ru-RU", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const titles = { board: "Закуп", signal: "Сигнал", fees: "Настройки" };
+    const titles = { board: "Закуп", signal: "Сигнал", haul: "Развоз", fees: "Настройки" };
     const hiddenBoard = readHidden("jita-cols-board");
+    const hiddenHaul = readHidden("jita-cols-haul");
     const hiddenSignal = {
       shout: readHidden("jita-cols-signal-shout"),
       off: readHidden("jita-cols-signal-off"),
       churn: readHidden("jita-cols-signal-churn"),
       squeeze: readHidden("jita-cols-signal-squeeze")
     };
+    let haulSort = "dailyIsk";
+    let haulDir = -1;
+    let haulPage = 1;
+    let haulSearchTimer = 0;
 
     function readHidden(key) {
       try {
@@ -631,7 +720,19 @@
       average: "Средняя цена вчерашних сделок по The Forge. В этом списке она не между текущей покупкой и продажей: вчера торговали заметно иначе, чем вилка сейчас.",
       buyMoves: "Сколько последних часов подряд менялась лучшая цена покупки. Чем больше, тем чаще придётся переставлять свой ордер.",
       sellMoves: "Сколько последних часов подряд менялась лучшая цена продажи.",
-      marginThen: "Маржа с одной штуки три часа назад, до начала падения. Сравни с текущей маржей."
+      marginThen: "Маржа с одной штуки три часа назад, до начала падения. Сравни с текущей маржей.",
+      fromName: "Станция или структура, где покупаете чужой sell.",
+      toName: "Куда везёте: здесь либо сразу продаёте в скупку, либо выставляете свой sell.",
+      ask: "Цена чужого sell на старте. Столько платите за одну штуку.",
+      bid: "Лучшая скупка на месте назначения. Мгновенная продажа — в неё.",
+      listSell: "По какой цене можно выставить свой sell на месте назначения: текущая лучшая продажа там.",
+      listMarginIsk: "Маржа с штуки, если купили по «Покупка» и выставили sell по «Выставить». Налог и брокерская с продажи уже внутри.",
+      listMarginFrac: "Та же маржа выставления в процентах от цены покупки.",
+      units: "Сколько штук проходит по глубине ордеров на обеих сторонах.",
+      dailyVolume: "Сколько штук продали вчера по региону The Forge, не только на этих станциях.",
+      jumps: "Прыжков по кратчайшему маршруту между системами.",
+      volumeM3: "Упакованный объём одной штуки в м³.",
+      cargoM3: "Объём всего объёма сделки: м³ за штуку × штуки."
     };
     let sortKey = "dailyIsk";
     let sortDir = -1;
@@ -784,9 +885,12 @@
       body.replaceChildren();
       const empty = document.getElementById("empty");
       empty.hidden = shown.length > 0;
-      empty.textContent = columnFilters().any
-        ? "Ничего не найдено."
-        : "В этом снимке нет строк с плюсовой маржой.";
+      const src = boardSources();
+      empty.textContent = !src.jita && !src.perimeter
+        ? "Включите Jita или Perimeter."
+        : columnFilters().any
+          ? "Ничего не найдено."
+          : "В этом снимке нет строк с плюсовой маржой.";
       for (const r of shown) {
         const tr = document.createElement("tr");
         tr.innerHTML =
@@ -815,11 +919,21 @@
       return s.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
 
+    function boardSources() {
+      return {
+        jita: document.getElementById("src-jita").checked,
+        perimeter: document.getElementById("src-perimeter").checked
+      };
+    }
+
     function columnFilters() {
+      const src = boardSources();
       const params = new URLSearchParams({
         page: String(page),
         sort: sortKey,
-        dir: sortDir < 0 ? "desc" : "asc"
+        dir: sortDir < 0 ? "desc" : "asc",
+        jita: src.jita ? "true" : "false",
+        perimeter: src.perimeter ? "true" : "false"
       });
       let any = false;
       document.querySelectorAll("#view-board .col-filter").forEach(input => {
@@ -839,6 +953,69 @@
       document.getElementById("sidebar").classList.remove("open");
       document.getElementById("backdrop").classList.remove("show");
       if (name === "signal") loadSignals().catch(() => {});
+      if (name === "haul") loadHaul().catch(() => {});
+    }
+
+    async function loadHaul() {
+      const haul = await fetch("/api/haul?" + haulFilters().params).then(r => r.json());
+      renderHaul(haul);
+    }
+
+    function haulFilters() {
+      const params = new URLSearchParams({
+        page: String(haulPage),
+        sort: haulSort,
+        dir: haulDir < 0 ? "desc" : "asc"
+      });
+      let any = false;
+      document.querySelectorAll("#view-haul .col-filter").forEach(input => {
+        if (input.closest("th").classList.contains("col-off")) return;
+        const value = filterText(input);
+        if (!value) return;
+        params.set(input.dataset.f, value);
+        any = true;
+      });
+      return { params, any };
+    }
+
+    function renderHaul(meta) {
+      const body = document.getElementById("haul-body");
+      body.replaceChildren();
+      const rows = meta?.rows || [];
+      haulPage = meta?.page || 1;
+      const pages = meta?.pages || 1;
+      document.getElementById("haul-page-label").textContent = `страница ${haulPage} из ${pages}`;
+      document.getElementById("haul-prev").disabled = haulPage <= 1;
+      document.getElementById("haul-next").disabled = haulPage >= pages;
+      document.querySelectorAll("#view-haul tr.cols th").forEach(th => {
+        const on = th.dataset.k === haulSort;
+        th.classList.toggle("sorted", on);
+        th.classList.toggle("asc", on && haulDir > 0);
+      });
+      const empty = document.getElementById("haul-empty");
+      empty.hidden = rows.length > 0;
+      empty.textContent = haulFilters().any ? "Ничего не найдено." : "Пока нет выгодных связок. Нужен свежий снимок по хабам.";
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
+          `<td class="left" title="${escapeHtml(r.fromName)}">${escapeHtml(r.fromName)}</td>` +
+          `<td class="left" title="${escapeHtml(r.toName)}">${escapeHtml(r.toName)}</td>` +
+          `<td>${cell(r.ask, "isk")}</td>` +
+          `<td>${cell(r.bid, "isk")}</td>` +
+          `<td>${cell(r.marginIsk, "isk")}</td>` +
+          `<td>${cell(r.marginFrac, "pct")}</td>` +
+          `<td>${cell(r.listSell, "isk")}</td>` +
+          `<td>${cell(r.listMarginIsk, "isk")}</td>` +
+          `<td>${cell(r.listMarginFrac, "pct")}</td>` +
+          `<td class="thin">${cell(r.units, "num")}</td>` +
+          `<td>${cell(r.dailyVolume, "num")}</td>` +
+          `<td>${cell(r.dailyIsk, "isk")}</td>` +
+          `<td>${cell(r.jumps, "num")}</td>` +
+          `<td>${cell(r.volumeM3, "num")}</td>`;
+        body.appendChild(tr);
+      }
+      applyColumns(document.getElementById("view-haul"), hiddenHaul);
     }
 
     async function loadSignals() {
@@ -962,6 +1139,7 @@
       const board = await fetch("/api/recommendations?" + params).then(r => r.json());
       renderTable(board);
       if (!document.getElementById("view-signal").hidden) await loadSignals();
+      if (!document.getElementById("view-haul").hidden) await loadHaul();
       if (!settingsReady) {
         const s = await fetch("/api/settings").then(r => r.json());
         document.getElementById("accounting").value = s.accounting;
@@ -1028,6 +1206,23 @@
         searchTimer = setTimeout(() => { tick().catch(() => {}); }, 300);
       });
     });
+    (() => {
+      const saved = localStorage.getItem("jita-board-sources");
+      if (saved) {
+        try {
+          const src = JSON.parse(saved);
+          if (typeof src.jita === "boolean") document.getElementById("src-jita").checked = src.jita;
+          if (typeof src.perimeter === "boolean") document.getElementById("src-perimeter").checked = src.perimeter;
+        } catch { /* ignore */ }
+      }
+      ["src-jita", "src-perimeter"].forEach(id => {
+        document.getElementById(id).addEventListener("change", () => {
+          localStorage.setItem("jita-board-sources", JSON.stringify(boardSources()));
+          page = 1;
+          tick().catch(() => {});
+        });
+      });
+    })();
     document.getElementById("prev").addEventListener("click", () => {
       if (page > 1) { page -= 1; tick().catch(() => {}); }
     });
@@ -1072,6 +1267,49 @@
         tick().catch(() => {});
       }
     );
+    const haulHint = {
+      ...colHint,
+      marginIsk: "Маржа с штуки при мгновенной продаже в скупку на месте назначения. Налог вычтен, брокерской нет.",
+      marginFrac: "Мгновенная маржа в процентах от цены покупки.",
+      dailyIsk: "Мгновенная маржа с штуки × сколько штук проходит по ордерам."
+    };
+    document.querySelectorAll("#view-haul tr.cols th").forEach(th => {
+      if (haulHint[th.dataset.k]) th.title = haulHint[th.dataset.k];
+    });
+    fillColMenu(
+      document.getElementById("haul-cols-menu"),
+      document.querySelectorAll("#view-haul tr.cols th"),
+      hiddenHaul,
+      () => {
+        writeHidden("jita-cols-haul", hiddenHaul);
+        applyColumns(document.getElementById("view-haul"), hiddenHaul);
+        haulPage = 1;
+        loadHaul().catch(() => {});
+      }
+    );
+    document.getElementById("haul-table").addEventListener("click", event => {
+      const th = event.target.closest("tr.cols th");
+      if (!th || !th.dataset.k) return;
+      const key = th.dataset.k;
+      if (haulSort === key) haulDir *= -1;
+      else { haulSort = key; haulDir = key === "name" || key === "fromName" || key === "toName" ? 1 : -1; }
+      haulPage = 1;
+      loadHaul().catch(() => {});
+    });
+    document.getElementById("haul-table").addEventListener("input", event => {
+      if (!event.target.classList.contains("col-filter")) return;
+      paintGrouped(event.target);
+      haulPage = 1;
+      clearTimeout(haulSearchTimer);
+      haulSearchTimer = setTimeout(() => { loadHaul().catch(() => {}); }, 300);
+    });
+    document.getElementById("haul-prev").addEventListener("click", () => {
+      if (haulPage > 1) { haulPage -= 1; loadHaul().catch(() => {}); }
+    });
+    document.getElementById("haul-next").addEventListener("click", () => {
+      haulPage += 1;
+      loadHaul().catch(() => {});
+    });
     document.querySelectorAll(".col-picker").forEach(picker => {
       picker.addEventListener("click", event => event.stopPropagation());
       picker.querySelector("button").addEventListener("click", () => {

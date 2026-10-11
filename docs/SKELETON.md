@@ -34,8 +34,10 @@
 Публикация самодостаточная, Windows x64, .NET на той машине не нужен: `dotnet publish JitaWatch.csproj -c Release -r win-x64 --self-contained true -o publish`. Перед этим остановить `JitaWatch.exe` (файл занят). Старт с рабочим каталогом `publish`. `publish\data` не удалять. Копировать на другой компьютер всю папку `publish`. Если `data\jita.db` рядом с exe нет, старт спрашивает, создать ли новую. Отказ — выход, файл не создаётся.
 
 ## Рынок
-- Регион The Forge `10000002`, станция Jita 4-4 `60003760`.
-- Снимок раз в час. В базе одна строка на тип: лучшая покупка = max buy, лучшая продажа = min sell.
+- Снимок раз в час по регионам хабов: The Forge, Domain, Sinq Laison, Heimatar, Metropolis.
+- **Закуп** — книга из `location_quote` по галкам Jita / Perimeter (по умолчанию обе). Сигнал по-прежнему смотрит полную склейку снимка. Структуры игроков ESI без логина не отдаёт — хвост.
+- **Развоз** — отдельный раздел. В `location_quote` sell от 500 тыс. ISK. Только выгодные мгновенные связки A→B (в скупку, без брокерской). Колонки «Выставить» / «Маржа выст.» — лучший sell на месте назначения и маржа с брокерской и налогом. Хабы: Jita, Perimeter, Amarr, Dodixie, Rens, Hek. Прыжки из ESI route, м³/шт из universe/types.
+- В базе по типу на доске: лучшая покупка = max buy, лучшая продажа = min sell.
 - Объём и число ордеров — внутри 1% от лучшей цены. Покупка: цена ≥ bestBuy×0.99. Продажа: цена ≤ bestSell×1.01.
 - Продажа дешевле 1 000 000 ISK не пишется.
 - Вчерашний объём — дневная история The Forge за вчера UTC. Пустой или не вчерашний день на доске пустой. Оценка = маржа × min(вчера, объём на покупке, объём на продаже).
@@ -71,4 +73,4 @@
 SQLite WAL. Деньги в TEXT. Таблицы: `snapshot`, `quote`, `type_name`, `daily_history`, `history_sync`, `setting`, `reject`, `status`. Срок хранения 1–400 дней, по умолчанию 120 (`setting.keep_days`). Чистка после снимка без VACUUM. Сохранение настроек чистит и делает VACUUM.
 
 ## API
-`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`.
+`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`.
