@@ -2,7 +2,7 @@
 
 Актуальная карта. Читать перед задачей. Обновлять в том же шаге, если меняются структура, схема БД, пороги доски или сигналов.
 
-Имя на экране и в трее: MK Jitawatch. Файл exe остаётся `JitaWatch.exe`. Каталог: `C:\Code\jita-watch`. Репозиторий: https://github.com/MerlKoryAmber/EveMark. Знак в шапке — `wwwroot/assets/brand-mark.png`. Вкладка и трей — готовый `wwwroot/favicon.ico` из squid-panel, он же `app.ico`.
+Имя на экране и в трее: MK Jitawatch. Файл exe остаётся `JitaWatch.exe`. Каталог: `C:\Code\jita-watch`. Репозиторий: https://github.com/MerlKoryAmber/EveMark. Для человека: `README.md`. Знак в шапке — `wwwroot/assets/brand-mark.png`. Вкладка и трей — готовый `wwwroot/favicon.ico` из squid-panel, он же `app.ico`.
 
 ## Статус
 Локальный стол Jita 4-4 работает. Ордера только читаются, заявки не ставятся. Приёмку ставит человек.
