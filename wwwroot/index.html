@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jita — закуп</title>
+  <title>MK Jitawatch</title>
+  <link rel="icon" href="/favicon.ico?v=2">
   <style>
     :root {
       --sidebar-width: clamp(200px, 18vw, 260px);
@@ -59,11 +60,33 @@
     }
     .sidebar-brand {
       flex-shrink: 0;
-      height: var(--top-h);
+      height: 64px;
       display: flex;
       align-items: center;
+      gap: 12px;
       padding: 0 var(--space-md);
       border-bottom: 1px solid var(--ir-border);
+    }
+    .brand-mark {
+      flex: 0 0 48px;
+      width: 48px;
+      height: 30px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px;
+      background: #fff;
+      border: 1px solid var(--ir-accent);
+      border-radius: 6px;
+    }
+    .brand-mark img {
+      display: block;
+      max-width: 42px;
+      max-height: 24px;
+      width: auto;
+      height: auto;
+      object-fit: contain;
     }
     .brand-title { font-size: 0.92rem; font-weight: 600; line-height: 1.25; }
     .brand-sub {
@@ -125,7 +148,7 @@
     .topbar-user { font-size: 0.85rem; color: var(--ir-text-secondary); text-align: right; }
     .err { color: var(--ir-danger); }
     .nav-toggle { display: none; }
-    .view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .view[hidden] { display: none !important; }
     .toolbar {
       flex: 0 0 auto;
@@ -166,8 +189,34 @@
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-secondary { background: transparent; color: var(--ir-text); border-color: var(--ir-border); }
     .btn-secondary:hover { background: var(--ir-surface-hover); border-color: var(--ir-accent); }
+    .col-picker { position: relative; }
+    .col-menu {
+      position: absolute;
+      z-index: 20;
+      top: calc(100% + 6px);
+      left: 0;
+      min-width: 14rem;
+      max-height: 70vh;
+      overflow: auto;
+      padding: 8px 12px;
+      background: var(--ir-surface);
+      border: 1px solid var(--ir-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+    }
+    .col-menu label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      font-size: 0.88rem;
+      color: var(--ir-text);
+      cursor: pointer;
+    }
+    .col-off { display: none; }
     .work {
       flex: 1 1 0%;
+      min-width: 0;
       min-height: 0;
       display: flex;
       flex-direction: column;
@@ -177,6 +226,7 @@
     .work-scroll { display: block; overflow: auto; }
     .table-wrap {
       flex: 1 1 0%;
+      min-width: 0;
       min-height: 0;
       display: flex;
       flex-direction: column;
@@ -186,7 +236,17 @@
       box-shadow: var(--shadow-sm);
       overflow: hidden;
     }
-    .table-scroll { flex: 1 1 0%; min-height: 0; overflow: auto; }
+    .table-scroll {
+      flex: 1 1 0%;
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--ir-accent) transparent;
+    }
+    .table-scroll::-webkit-scrollbar { display: block; width: 0; height: 10px; }
+    .table-scroll::-webkit-scrollbar-thumb { background: var(--ir-accent); border-radius: 5px; }
+    .table-scroll::-webkit-scrollbar-track { background: transparent; }
     table.data { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
     table.data th, table.data td {
       padding: 8px 12px;
@@ -196,7 +256,17 @@
       text-align: right;
       font-variant-numeric: tabular-nums;
     }
-    table.data th.left, table.data td.left { text-align: left; }
+    table.data th.left, table.data td.left {
+      position: sticky;
+      left: 0;
+      text-align: left;
+      background: var(--ir-surface);
+      box-shadow: 1px 0 0 var(--ir-border);
+    }
+    table.data thead tr.cols th.left { z-index: 5; background: var(--ir-primary-light); }
+    table.data thead tr.filters th.left { z-index: 4; }
+    table.data tbody td.left { z-index: 1; }
+    table.data tbody tr:hover td.left { background: var(--ir-surface-hover); }
     table.data th {
       position: sticky;
       top: 0;
@@ -306,8 +376,9 @@
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-brand">
+        <div class="brand-mark"><img src="/assets/brand-mark.png" alt=""></div>
         <div>
-          <div class="brand-title">Jita</div>
+          <div class="brand-title">MK Jitawatch</div>
           <span class="brand-sub">закуп</span>
         </div>
       </div>
@@ -328,6 +399,10 @@
       <section class="view" id="view-board">
         <div class="toolbar">
           <button id="collect" class="btn" type="button">Снять сейчас</button>
+          <div class="col-picker" id="board-picker">
+            <button id="board-cols" class="btn btn-secondary" type="button">Столбцы</button>
+            <div class="col-menu" id="board-cols-menu" hidden></div>
+          </div>
           <span class="toolbar-hint" id="rates"></span>
         </div>
         <div class="work">
@@ -344,8 +419,14 @@
                     <th data-k="dailyVolume">Объём/сутки</th>
                     <th class="sorted" data-k="dailyIsk" title="Маржа × минимум из вчерашнего объёма и обеих полос 1%">Оценка/сутки</th>
                     <th data-k="hours">Часов</th>
+                    <th data-k="relists" title="Сколько раз можно опустить продажу, пока маржа не кончится. Advanced Broker Relations 0: плата 50% брокерской от цены продажи. Минимум 100 ISK за приказ в это число не входит.">Перестановок</th>
                     <th data-k="buyVolume" title="Объём и ордера в пределах 1% от лучшей цены покупки">На покупке</th>
+                    <th data-k="buyTouch" title="Штук ровно по лучшей цене покупки. Прочерк — этот снимок ещё без отдельного счёта.">На лучшей покупке</th>
                     <th data-k="sellVolume" title="Объём и ордера в пределах 1% от лучшей цены продажи">На продаже</th>
+                    <th data-k="sellTouch" title="Штук ровно по лучшей цене продажи. Прочерк — этот снимок ещё без отдельного счёта.">На лучшей продаже</th>
+                    <th data-k="capital" title="Покупка × меньшая из двух полос 1%. Столько ISK заморозить, чтобы занять обе стороны.">Капитал</th>
+                    <th data-k="days" title="Объём обеих полос делить на вчерашние продажи The Forge.">Дней</th>
+                    <th data-k="dailyRoi" title="Оценка за сутки делить на капитал.">В день</th>
                   </tr>
                   <tr class="filters">
                     <th class="left name"><input class="col-filter" data-f="name" type="search" aria-label="Предмет"></th>
@@ -356,8 +437,14 @@
                     <th class="compact"><span class="range"><input class="col-filter" data-f="dailyVolumeMin" data-g="1" type="search" placeholder="от" aria-label="Объём от"><input class="col-filter" data-f="dailyVolumeMax" data-g="1" type="search" placeholder="до" aria-label="Объём до"></span></th>
                     <th class="money"><span class="range"><input class="col-filter" data-f="dailyIskMin" data-g="1" type="search" placeholder="от" aria-label="Оценка от"><input class="col-filter" data-f="dailyIskMax" data-g="1" type="search" placeholder="до" aria-label="Оценка до"></span></th>
                     <th class="compact"><span class="range"><input class="col-filter" data-f="hoursMin" data-g="1" type="search" placeholder="от" aria-label="Часов от"><input class="col-filter" data-f="hoursMax" data-g="1" type="search" placeholder="до" aria-label="Часов до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="relistsMin" data-g="1" type="search" placeholder="от" aria-label="Перестановок от"><input class="col-filter" data-f="relistsMax" data-g="1" type="search" placeholder="до" aria-label="Перестановок до"></span></th>
                     <th class="compact"><span class="range"><input class="col-filter" data-f="buyVolumeMin" data-g="1" type="search" placeholder="от" aria-label="На покупке от"><input class="col-filter" data-f="buyVolumeMax" data-g="1" type="search" placeholder="до" aria-label="На покупке до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="buyTouchMin" data-g="1" type="search" placeholder="от" aria-label="На лучшей покупке от"><input class="col-filter" data-f="buyTouchMax" data-g="1" type="search" placeholder="до" aria-label="На лучшей покупке до"></span></th>
                     <th class="compact"><span class="range"><input class="col-filter" data-f="sellVolumeMin" data-g="1" type="search" placeholder="от" aria-label="На продаже от"><input class="col-filter" data-f="sellVolumeMax" data-g="1" type="search" placeholder="до" aria-label="На продаже до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="sellTouchMin" data-g="1" type="search" placeholder="от" aria-label="На лучшей продаже от"><input class="col-filter" data-f="sellTouchMax" data-g="1" type="search" placeholder="до" aria-label="На лучшей продаже до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="capitalMin" data-g="1" type="search" placeholder="от" aria-label="Капитал от"><input class="col-filter" data-f="capitalMax" data-g="1" type="search" placeholder="до" aria-label="Капитал до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="daysMin" type="search" placeholder="от" aria-label="Дней от"><input class="col-filter" data-f="daysMax" type="search" placeholder="до" aria-label="Дней до"></span></th>
+                    <th class="pct"><span class="range"><input class="col-filter" data-f="dailyRoiMin" type="search" placeholder="от" aria-label="В день от"><input class="col-filter" data-f="dailyRoiMax" type="search" placeholder="до" aria-label="В день до"></span></th>
                   </tr>
                 </thead>
                 <tbody id="body"></tbody>
@@ -379,6 +466,10 @@
           <button class="btn btn-secondary" type="button" data-signal="off">Мимо цены</button>
           <button class="btn btn-secondary" type="button" data-signal="churn">Дёргают</button>
           <button class="btn btn-secondary" type="button" data-signal="squeeze">Сжимается</button>
+          <div class="col-picker" id="signal-picker">
+            <button id="signal-cols" class="btn btn-secondary" type="button">Столбцы</button>
+            <div class="col-menu" id="signal-cols-menu" hidden></div>
+          </div>
           <span class="toolbar-hint" id="signal-hint"></span>
         </div>
         <div class="work">
@@ -473,6 +564,75 @@
     const iskWhole = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
     const pct = new Intl.NumberFormat("ru-RU", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const titles = { board: "Закуп", signal: "Сигнал", fees: "Настройки" };
+    const hiddenBoard = readHidden("jita-cols-board");
+    const hiddenSignal = {
+      shout: readHidden("jita-cols-signal-shout"),
+      off: readHidden("jita-cols-signal-off"),
+      churn: readHidden("jita-cols-signal-churn"),
+      squeeze: readHidden("jita-cols-signal-squeeze")
+    };
+
+    function readHidden(key) {
+      try {
+        const list = JSON.parse(localStorage.getItem(key) || "[]");
+        return new Set(Array.isArray(list) ? list.filter(k => k !== "name") : []);
+      } catch {
+        return new Set();
+      }
+    }
+
+    function writeHidden(key, hidden) {
+      localStorage.setItem(key, JSON.stringify([...hidden]));
+    }
+
+    function applyColumns(root, hidden) {
+      const heads = [...root.querySelectorAll("tr.cols th")];
+      const filters = [...root.querySelectorAll("tr.filters th")];
+      heads.forEach((th, i) => {
+        const off = hidden.has(th.dataset.k);
+        th.classList.toggle("col-off", off);
+        if (filters[i]) filters[i].classList.toggle("col-off", off);
+      });
+      root.querySelectorAll("tbody tr").forEach(tr => {
+        [...tr.children].forEach((td, i) => {
+          td.classList.toggle("col-off", hidden.has(heads[i]?.dataset.k));
+        });
+      });
+    }
+
+    function fillColMenu(menu, heads, hidden, save) {
+      menu.replaceChildren();
+      for (const th of heads) {
+        const key = th.dataset.k;
+        const label = document.createElement("label");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = !hidden.has(key);
+        box.disabled = key === "name";
+        box.addEventListener("change", () => {
+          if (box.checked) hidden.delete(key);
+          else hidden.add(key);
+          save();
+        });
+        label.append(box, document.createTextNode(th.textContent));
+        menu.appendChild(label);
+      }
+    }
+    const colHint = {
+      name: "Название. Ссылка открывает карточку предмета на EveTycoon.",
+      bestBuy: "Самая высокая цена, по которой в Jita 4-4 прямо сейчас готовы купить одну штуку.",
+      bestSell: "Самая низкая цена, по которой в Jita 4-4 прямо сейчас продают одну штуку.",
+      marginIsk: "Сколько ISK останется с одной штуки, если купить и сразу продать. Налог и брокерская уже вычтены.",
+      marginFrac: "Та же маржа в процентах от денег, которые уйдут на покупку.",
+      dailyVolume: "Сколько штук продали вчера по региону The Forge, не только на этой станции.",
+      dailyIsk: "Сколько ISK можно снять за сутки: маржа с одной штуки умножить на меньшее из вчерашнего объёма и того, сколько товара стоит рядом с лучшей ценой.",
+      hours: "Сколько часов подряд разница цен держалась, и с обеих сторон было хотя бы две штуки. Пропуск больше полутора часов обнуляет счёт.",
+      thin: "Какой стороны мало. «покупка» — купить легко, продать труднее: желающих купить вдвое меньше. «продажа» — наоборот. Пустая ячейка — стороны примерно равны.",
+      average: "Средняя цена вчерашних сделок по The Forge. В этом списке она не между текущей покупкой и продажей: вчера торговали заметно иначе, чем вилка сейчас.",
+      buyMoves: "Сколько последних часов подряд менялась лучшая цена покупки. Чем больше, тем чаще придётся переставлять свой ордер.",
+      sellMoves: "Сколько последних часов подряд менялась лучшая цена продажи.",
+      marginThen: "Маржа с одной штуки три часа назад, до начала падения. Сравни с текущей маржей."
+    };
     let sortKey = "dailyIsk";
     let sortDir = -1;
     let signalKind = "shout";
@@ -608,7 +768,7 @@
       if (meta) {
         document.getElementById("rates").textContent =
           `Налог ${pct.format(meta.salesTax)}, брокерская ${pct.format(meta.brokerFee)}. ` +
-          `В снимке ${meta.tracked}, с плюсовой маржой ${meta.shown}.`;
+          `В снимке ${meta.tracked}, с плюсовой маржой ${meta.shown}. Маржа выше 5 000% скрыта.`;
         page = meta.page || 1;
         const pages = meta.pages || 1;
         document.getElementById("page-label").textContent = `страница ${page} из ${pages}`;
@@ -630,7 +790,7 @@
       for (const r of shown) {
         const tr = document.createElement("tr");
         tr.innerHTML =
-          `<td class="left"><a href="https://evetycoon.com/market/60003760/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
+          `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
           `<td>${cell(r.bestBuy, "isk")}</td>` +
           `<td>${cell(r.bestSell, "isk")}</td>` +
           `<td>${cell(r.marginIsk, "isk")}</td>` +
@@ -638,10 +798,17 @@
           `<td title="${r.volumeDay || ""}">${cell(r.dailyVolume, "num")}</td>` +
           `<td>${cell(r.dailyIsk, "isk")}</td>` +
           `<td>${cell(r.hours, "num")}</td>` +
+          `<td>${cell(r.relists, "num")}</td>` +
           `<td>${cell(r.buyVolume, "num")} (${r.buyOrders})</td>` +
-          `<td>${cell(r.sellVolume, "num")} (${r.sellOrders})</td>`;
+          `<td>${cell(r.buyTouch, "num")}</td>` +
+          `<td>${cell(r.sellVolume, "num")} (${r.sellOrders})</td>` +
+          `<td>${cell(r.sellTouch, "num")}</td>` +
+          `<td>${cell(r.capital, "isk")}</td>` +
+          `<td>${cell(r.days, "num")}</td>` +
+          `<td>${cell(r.dailyRoi, "pct")}</td>`;
         body.appendChild(tr);
       }
+      applyColumns(document.getElementById("view-board"), hiddenBoard);
     }
 
     function escapeHtml(s) {
@@ -656,6 +823,7 @@
       });
       let any = false;
       document.querySelectorAll("#view-board .col-filter").forEach(input => {
+        if (input.closest("th").classList.contains("col-off")) return;
         const value = filterText(input);
         if (!value) return;
         params.set(input.dataset.f, value);
@@ -690,6 +858,7 @@
       });
       let any = false;
       document.querySelectorAll("#view-signal .col-filter").forEach(input => {
+        if (input.closest("th").classList.contains("col-off")) return;
         const value = filterText(input);
         if (!value) return;
         params.set(input.dataset.f, value);
@@ -722,13 +891,14 @@
         tr.innerHTML = cols.map(col => {
           const [key, , kind] = col;
           if (key === "name")
-            return `<td class="left"><a href="https://evetycoon.com/market/60003760/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>`;
+            return `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>`;
           if (kind === "text")
             return `<td class="left">${escapeHtml(r[key] || "—")}</td>`;
           return `<td>${cell(r[key], kind)}</td>`;
         }).join("");
         body.appendChild(tr);
       }
+      applyColumns(document.getElementById("view-signal"), hiddenSignal[signalKind]);
     }
 
     function buildSignalHead() {
@@ -743,6 +913,7 @@
         const th = document.createElement("th");
         th.dataset.k = key;
         th.textContent = title;
+        if (colHint[key]) th.title = colHint[key];
         if (kind === "text") th.classList.add("left");
         if (key === signalSort) {
           th.classList.add("sorted");
@@ -758,6 +929,18 @@
           : `<span class="range"><input class="col-filter" data-f="${key}Min"${group} type="search" placeholder="от" aria-label="${title} от"><input class="col-filter" data-f="${key}Max"${group} type="search" placeholder="до" aria-label="${title} до"></span>`;
         filters.appendChild(fh);
       }
+      applyColumns(document.getElementById("view-signal"), hiddenSignal[signalKind]);
+      fillColMenu(
+        document.getElementById("signal-cols-menu"),
+        document.querySelectorAll("#view-signal tr.cols th"),
+        hiddenSignal[signalKind],
+        () => {
+          writeHidden("jita-cols-signal-" + signalKind, hiddenSignal[signalKind]);
+          applyColumns(document.getElementById("view-signal"), hiddenSignal[signalKind]);
+          signalPage = 1;
+          loadSignals().catch(() => {});
+        }
+      );
     }
 
     function setSignalKind(kind) {
@@ -877,6 +1060,29 @@
     document.getElementById("collect").addEventListener("click", async () => {
       await fetch("/api/collect", { method: "POST" });
       await tick();
+    });
+    fillColMenu(
+      document.getElementById("board-cols-menu"),
+      document.querySelectorAll("#view-board tr.cols th"),
+      hiddenBoard,
+      () => {
+        writeHidden("jita-cols-board", hiddenBoard);
+        applyColumns(document.getElementById("view-board"), hiddenBoard);
+        page = 1;
+        tick().catch(() => {});
+      }
+    );
+    document.querySelectorAll(".col-picker").forEach(picker => {
+      picker.addEventListener("click", event => event.stopPropagation());
+      picker.querySelector("button").addEventListener("click", () => {
+        const menu = picker.querySelector(".col-menu");
+        const open = menu.hidden;
+        document.querySelectorAll(".col-menu").forEach(other => { other.hidden = true; });
+        menu.hidden = !open;
+      });
+    });
+    document.addEventListener("click", () => {
+      document.querySelectorAll(".col-menu").forEach(menu => { menu.hidden = true; });
     });
     buildSignalHead();
     if (location.hash === "#signal") showView("signal");

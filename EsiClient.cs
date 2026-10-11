@@ -12,6 +12,8 @@ public sealed class Book
     public decimal BestSell { get; private set; }
     public long BuyVolume { get; private set; }
     public long SellVolume { get; private set; }
+    public long BuyTouch { get; private set; }
+    public long SellTouch { get; private set; }
     public int BuyOrders { get; private set; }
     public int SellOrders { get; private set; }
     public bool HasSell { get; private set; }
@@ -51,6 +53,11 @@ public sealed class Book
                 SellVolume += volume;
                 SellOrders++;
             }
+
+            if (isBuy && BestBuy is decimal touch && price == touch)
+                BuyTouch += volume;
+            else if (!isBuy && HasSell && price == BestSell)
+                SellTouch += volume;
         }
 
         _orders.Clear();

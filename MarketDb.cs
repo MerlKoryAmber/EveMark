@@ -30,6 +30,12 @@ public sealed record BoardRow
     public long SellVolume { get; init; }
     public int BuyOrders { get; init; }
     public int SellOrders { get; init; }
+    public long? BuyTouch { get; init; }
+    public long? SellTouch { get; init; }
+    public int Relists { get; init; }
+    public decimal? Capital { get; init; }
+    public decimal? Days { get; init; }
+    public decimal? DailyRoi { get; init; }
     public string Thin { get; init; } = "";
     public int BuyMoves { get; init; }
     public int SellMoves { get; init; }
@@ -123,10 +129,17 @@ public sealed record ColumnFilter(
     NumRange BuyMoves,
     NumRange SellMoves,
     NumRange MarginThen,
-    string? Thin);
+    string? Thin,
+    NumRange BuyTouch,
+    NumRange SellTouch,
+    NumRange Relists,
+    NumRange Capital,
+    NumRange Days,
+    NumRange DailyRoi);
 
 public sealed class MarketDb
 {
+    private const decimal MaxBoardMarginPercent = 5000m;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path;
 
@@ -202,6 +215,8 @@ public sealed class MarketDb
                 INSERT INTO setting (key, value) VALUES ('corp', '0') ON CONFLICT(key) DO NOTHING;
                 INSERT INTO setting (key, value) VALUES ('keep_days', '120') ON CONFLICT(key) DO NOTHING;
                 """, ("$now", Stamp(DateTime.UtcNow)));
+            await EnsureColumnAsync(conn, "quote", "buy_touch", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnAsync(conn, "quote", "sell_touch", "INTEGER NOT NULL DEFAULT 0", ct);
         }, ct);
     }
 
@@ -288,8 +303,10 @@ public sealed class MarketDb
             await using var quote = conn.CreateCommand();
             quote.Transaction = (SqliteTransaction)tx;
             quote.CommandText = """
-                INSERT INTO quote (snapshot_id, type_id, best_buy, best_sell, buy_volume, sell_volume, buy_orders, sell_orders)
-                VALUES ($sid, $type, $bb, $bs, $bv, $sv, $bo, $so)
+                INSERT INTO quote (
+                    snapshot_id, type_id, best_buy, best_sell, buy_volume, sell_volume, buy_orders, sell_orders,
+                    buy_touch, sell_touch)
+                VALUES ($sid, $type, $bb, $bs, $bv, $sv, $bo, $so, $bt, $st)
                 """;
             var pSid = quote.Parameters.Add("$sid", SqliteType.Integer);
             var pType = quote.Parameters.Add("$type", SqliteType.Integer);
@@ -299,6 +316,8 @@ public sealed class MarketDb
             var pSv = quote.Parameters.Add("$sv", SqliteType.Integer);
             var pBo = quote.Parameters.Add("$bo", SqliteType.Integer);
             var pSo = quote.Parameters.Add("$so", SqliteType.Integer);
+            var pBt = quote.Parameters.Add("$bt", SqliteType.Integer);
+            var pSt = quote.Parameters.Add("$st", SqliteType.Integer);
             pSid.Value = id;
             foreach (var row in rows)
             {
@@ -309,6 +328,8 @@ public sealed class MarketDb
                 pSv.Value = row.SellVolume;
                 pBo.Value = row.BuyOrders;
                 pSo.Value = row.SellOrders;
+                pBt.Value = row.BuyTouch;
+                pSt.Value = row.SellTouch;
                 await quote.ExecuteNonQueryAsync(ct);
             }
 
@@ -670,7 +691,9 @@ public sealed class MarketDb
             var takenAt = load.TakenAt;
             var rawCount = load.Tracked;
 
-            var filtered = ranked.Where(row => MatchesColumns(row, filter)).ToList();
+            var filtered = ranked
+                .Where(row => row.MarginFrac * 100m <= MaxBoardMarginPercent && MatchesColumns(row, filter))
+                .ToList();
             var sortKey = SortKey(sort);
             var descending = !string.Equals(dir, "asc", StringComparison.OrdinalIgnoreCase);
             if (sortKey == "hours")
@@ -728,7 +751,7 @@ public sealed class MarketDb
         {
             cmd.CommandText = """
                 SELECT q.type_id, IFNULL(n.name, '#' || q.type_id), q.best_buy, q.best_sell,
-                       q.buy_volume, q.sell_volume, q.buy_orders, q.sell_orders
+                       q.buy_volume, q.sell_volume, q.buy_orders, q.sell_orders, q.buy_touch, q.sell_touch
                 FROM quote q
                 LEFT JOIN type_name n ON n.type_id = q.type_id
                 WHERE q.snapshot_id = $id
@@ -747,7 +770,9 @@ public sealed class MarketDb
                     ReadLong(reader, 4),
                     ReadLong(reader, 5),
                     ReadInt(reader, 6),
-                    ReadInt(reader, 7)));
+                    ReadInt(reader, 7),
+                    ReadLong(reader, 8),
+                    ReadLong(reader, 9)));
             }
         }
 
@@ -782,9 +807,11 @@ public sealed class MarketDb
                 continue;
             history.TryGetValue(quote.TypeId, out var hist);
             var tradedYesterday = hist is not null && hist.Day == yesterday;
+            var pile = Math.Min(quote.BuyVolume, quote.SellVolume);
             var depth = tradedYesterday
-                ? Math.Min(hist!.Volume, Math.Min(quote.BuyVolume, quote.SellVolume))
+                ? Math.Min(hist!.Volume, pile)
                 : (long?)null;
+            var capital = pile > 0 ? buy * pile : (decimal?)null;
             ranked.Add(new BoardRow
             {
                 TypeId = quote.TypeId,
@@ -801,7 +828,13 @@ public sealed class MarketDb
                 BuyVolume = quote.BuyVolume,
                 SellVolume = quote.SellVolume,
                 BuyOrders = quote.BuyOrders,
-                SellOrders = quote.SellOrders
+                SellOrders = quote.SellOrders,
+                BuyTouch = quote.BuyTouch > 0 ? quote.BuyTouch : null,
+                SellTouch = quote.SellTouch > 0 ? quote.SellTouch : null,
+                Relists = FeeMath.Relists(margin, quote.BestSell, fees.BrokerFee),
+                Capital = capital,
+                Days = tradedYesterday && hist!.Volume > 0 && pile > 0 ? pile / (decimal)hist.Volume : null,
+                DailyRoi = capital is > 0 && depth is not null ? margin * depth.Value / capital.Value : null
             });
         }
 
@@ -883,6 +916,11 @@ public sealed class MarketDb
             "dailyIsk" => a.DailyIsk is null,
             "average" => a.Average is null,
             "marginThen" => a.MarginThen is null,
+            "buyTouch" => a.BuyTouch is null,
+            "sellTouch" => a.SellTouch is null,
+            "capital" => a.Capital is null,
+            "days" => a.Days is null,
+            "dailyRoi" => a.DailyRoi is null,
             _ => null
         };
         if (missing is null)
@@ -892,6 +930,11 @@ public sealed class MarketDb
             "dailyVolume" => b.DailyVolume is null,
             "average" => b.Average is null,
             "marginThen" => b.MarginThen is null,
+            "buyTouch" => b.BuyTouch is null,
+            "sellTouch" => b.SellTouch is null,
+            "capital" => b.Capital is null,
+            "days" => b.Days is null,
+            "dailyRoi" => b.DailyRoi is null,
             _ => b.DailyIsk is null
         };
         if (missing == other)
@@ -917,6 +960,12 @@ public sealed class MarketDb
         "hours" => a.Hours.CompareTo(b.Hours),
         "buyVolume" => a.BuyVolume.CompareTo(b.BuyVolume),
         "sellVolume" => a.SellVolume.CompareTo(b.SellVolume),
+        "buyTouch" => Nullable.Compare(a.BuyTouch, b.BuyTouch),
+        "sellTouch" => Nullable.Compare(a.SellTouch, b.SellTouch),
+        "relists" => a.Relists.CompareTo(b.Relists),
+        "capital" => Nullable.Compare(a.Capital, b.Capital),
+        "days" => Nullable.Compare(a.Days, b.Days),
+        "dailyRoi" => Nullable.Compare(a.DailyRoi, b.DailyRoi),
         "average" => Nullable.Compare(a.Average, b.Average),
         "buyMoves" => a.BuyMoves.CompareTo(b.BuyMoves),
         "sellMoves" => a.SellMoves.CompareTo(b.SellMoves),
@@ -929,7 +978,8 @@ public sealed class MarketDb
     {
         "name" or "bestBuy" or "bestSell" or "marginIsk" or "marginFrac"
             or "dailyVolume" or "dailyIsk" or "hours" or "buyVolume" or "sellVolume"
-            or "average" or "buyMoves" or "sellMoves" or "marginThen" or "thin" => sort,
+            or "average" or "buyMoves" or "sellMoves" or "marginThen" or "thin"
+            or "buyTouch" or "sellTouch" or "relists" or "capital" or "days" or "dailyRoi" => sort,
         _ => "dailyIsk"
     };
 
@@ -945,6 +995,12 @@ public sealed class MarketDb
             && filter.Hours.Fits(row.Hours)
             && filter.BuyVolume.Fits(row.BuyVolume)
             && filter.SellVolume.Fits(row.SellVolume)
+            && filter.BuyTouch.Fits(row.BuyTouch)
+            && filter.SellTouch.Fits(row.SellTouch)
+            && filter.Relists.Fits(row.Relists)
+            && filter.Capital.Fits(row.Capital)
+            && filter.Days.Fits(row.Days)
+            && filter.DailyRoi.Fits(row.DailyRoi * 100m)
             && filter.Average.Fits(row.Average)
             && filter.BuyMoves.Fits(row.BuyMoves)
             && filter.SellMoves.Fits(row.SellMoves)
@@ -1081,7 +1137,27 @@ public sealed class MarketDb
         long BuyVolume,
         long SellVolume,
         int BuyOrders,
-        int SellOrders);
+        int SellOrders,
+        long BuyTouch,
+        long SellTouch);
+
+    private static async Task EnsureColumnAsync(SqliteConnection conn, string table, string column, string type, CancellationToken ct)
+    {
+        var found = false;
+        await using (var info = conn.CreateCommand())
+        {
+            info.CommandText = $"PRAGMA table_info({table})";
+            await using var reader = await info.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                    found = true;
+            }
+        }
+
+        if (!found)
+            await ExecAsync(conn, $"ALTER TABLE {table} ADD COLUMN {column} {type}");
+    }
 
     private static bool InSection(BoardRow row, string section) => section switch
     {
@@ -1209,4 +1285,6 @@ public sealed record QuoteInsert(
     long BuyVolume,
     long SellVolume,
     int BuyOrders,
-    int SellOrders);
+    int SellOrders,
+    long BuyTouch,
+    long SellTouch);

@@ -15,11 +15,12 @@ internal sealed class TrayContext : ApplicationContext
         menu.Items.Add("Сигнал", null, (_, _) => OpenSignal());
         menu.Items.Add("Выход", null, (_, _) => ExitThread());
 
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "favicon.ico");
         _icon = new NotifyIcon
         {
-            Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application,
+            Icon = new Icon(iconPath),
             Visible = true,
-            Text = "Jita — закуп",
+            Text = "MK Jitawatch",
             ContextMenuStrip = menu
         };
         _icon.DoubleClick += (_, _) => OpenPanel();
@@ -44,10 +45,10 @@ internal sealed class TrayContext : ApplicationContext
             if (signal is null)
                 return;
             var shout = signal.Tone == "shout";
-            _icon.Text = shout ? "Есть шанс заработать" : "Jita — закуп";
+            _icon.Text = shout ? "Есть шанс заработать" : "MK Jitawatch";
             if (shout && signal.Shown > _shouted)
             {
-                _icon.ShowBalloonTip(8000, "Jita", "Есть шанс заработать. Иди покупай.", ToolTipIcon.Info);
+                _icon.ShowBalloonTip(8000, "MK Jitawatch", "Есть шанс заработать. Иди покупай.", ToolTipIcon.Info);
             }
 
             _shouted = shout ? signal.Shown : 0;

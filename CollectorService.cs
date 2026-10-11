@@ -136,7 +136,9 @@ public sealed class CollectorService : BackgroundService
                     book.BuyVolume,
                     book.SellVolume,
                     book.BuyOrders,
-                    book.SellOrders));
+                    book.SellOrders,
+                    book.BuyTouch,
+                    book.SellTouch));
             }
 
             var taken = DateTime.UtcNow;

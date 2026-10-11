@@ -132,7 +132,13 @@ internal static class Program
                     NumRange.Parse(buyMovesMin, buyMovesMax),
                     NumRange.Parse(sellMovesMin, sellMovesMax),
                     NumRange.Parse(marginThenMin, marginThenMax),
-                    thin),
+                    thin,
+                    default,
+                    default,
+                    default,
+                    default,
+                    default,
+                    default),
                 ct));
         app.MapGet("/api/recommendations", (
             MarketDb db,
@@ -158,6 +164,18 @@ internal static class Program
             string? buyVolumeMax,
             string? sellVolumeMin,
             string? sellVolumeMax,
+            string? buyTouchMin,
+            string? buyTouchMax,
+            string? sellTouchMin,
+            string? sellTouchMax,
+            string? relistsMin,
+            string? relistsMax,
+            string? capitalMin,
+            string? capitalMax,
+            string? daysMin,
+            string? daysMax,
+            string? dailyRoiMin,
+            string? dailyRoiMax,
             CancellationToken ct) =>
             db.GetBoardAsync(
                 page ?? 1,
@@ -178,7 +196,13 @@ internal static class Program
                     default,
                     default,
                     default,
-                    null),
+                    null,
+                    NumRange.Parse(buyTouchMin, buyTouchMax),
+                    NumRange.Parse(sellTouchMin, sellTouchMax),
+                    NumRange.Parse(relistsMin, relistsMax),
+                    NumRange.Parse(capitalMin, capitalMax),
+                    NumRange.Parse(daysMin, daysMax),
+                    NumRange.Parse(dailyRoiMin, dailyRoiMax)),
                 ct));
 
         app.Lifetime.ApplicationStarted.Register(TrayContext.OpenPanel);
@@ -198,7 +222,7 @@ internal static class Program
     {
         var answer = MessageBox.Show(
             "Рядом с программой нет базы. Создать новую?",
-            "Jita",
+            "MK Jitawatch",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
         if (answer != DialogResult.Yes)
