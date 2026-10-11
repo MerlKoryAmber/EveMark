@@ -303,6 +303,7 @@ public sealed class MarketDb
                 INSERT INTO setting (key, value) VALUES ('faction', '0') ON CONFLICT(key) DO NOTHING;
                 INSERT INTO setting (key, value) VALUES ('corp', '0') ON CONFLICT(key) DO NOTHING;
                 INSERT INTO setting (key, value) VALUES ('keep_days', '120') ON CONFLICT(key) DO NOTHING;
+                INSERT INTO setting (key, value) VALUES ('tray_notify', '1') ON CONFLICT(key) DO NOTHING;
                 """, ("$now", Stamp(DateTime.UtcNow)));
             await EnsureColumnAsync(conn, "quote", "buy_touch", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnAsync(conn, "quote", "sell_touch", "INTEGER NOT NULL DEFAULT 0", ct);
@@ -344,6 +345,22 @@ public sealed class MarketDb
                 LatestTypes = Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture)
             };
         }, ct);
+
+    public Task<bool> GetTrayNotifyAsync(CancellationToken ct = default) =>
+        WithAsync(async conn =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT value FROM setting WHERE key = 'tray_notify'";
+            var value = await cmd.ExecuteScalarAsync(ct) as string;
+            return value is null or "1" or "true" or "yes";
+        }, ct);
+
+    public Task SetTrayNotifyAsync(bool enabled, CancellationToken ct = default) =>
+        WithAsync(conn => ExecAsync(conn, """
+            INSERT INTO setting (key, value) VALUES ('tray_notify', $v)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            ("$v", enabled ? "1" : "0")), ct);
 
     public Task<FeeSettings> GetSettingsAsync(CancellationToken ct = default) =>
         WithAsync(async conn => (await ReadSettingsAsync(conn)) with { DatabaseBytes = DatabaseBytes() }, ct);
@@ -571,6 +588,36 @@ public sealed class MarketDb
             cmd.CommandText = """
                 SELECT type_id FROM quote
                 WHERE snapshot_id = (SELECT id FROM snapshot ORDER BY taken_at DESC LIMIT 1)
+                """;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                list.Add(Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture));
+            return (IReadOnlyList<int>)list;
+        }, ct);
+
+    /// <summary>Типы закупа и развоза без нормального имени (нет строки или заглушка #id).</summary>
+    public Task<IReadOnlyList<int>> TypesNeedingNamesAsync(CancellationToken ct = default) =>
+        WithAsync(async conn =>
+        {
+            var list = new List<int>();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT DISTINCT type_id FROM (
+                    SELECT q.type_id AS type_id
+                    FROM quote q
+                    LEFT JOIN type_name n ON n.type_id = q.type_id
+                    WHERE q.snapshot_id = (SELECT id FROM snapshot ORDER BY taken_at DESC LIMIT 1)
+                      AND q.type_id NOT IN (SELECT type_id FROM reject)
+                      AND (n.type_id IS NULL OR IFNULL(n.name, '') = '' OR n.name LIKE '#%')
+                    UNION
+                    SELECT lq.type_id
+                    FROM location_quote lq
+                    LEFT JOIN type_name n ON n.type_id = lq.type_id
+                    WHERE lq.snapshot_id = (SELECT id FROM snapshot ORDER BY taken_at DESC LIMIT 1)
+                      AND lq.type_id NOT IN (SELECT type_id FROM reject)
+                      AND (n.type_id IS NULL OR IFNULL(n.name, '') = '' OR n.name LIKE '#%')
+                )
+                ORDER BY type_id
                 """;
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
@@ -1088,7 +1135,7 @@ public sealed class MarketDb
                         var row = new HaulRow
                         {
                             TypeId = typeId,
-                            Name = names.GetValueOrDefault(typeId, typeId.ToString(CultureInfo.InvariantCulture)),
+                            Name = ResolveTypeName(names, typeId),
                             FromName = fromMeta.Name,
                             ToName = toMeta.Name,
                             FromLocationId = from.LocationId,
@@ -1744,6 +1791,15 @@ public sealed class MarketDb
         int SellOrders,
         long BuyTouch,
         long SellTouch);
+
+    private static string ResolveTypeName(Dictionary<int, string> names, int typeId)
+    {
+        if (names.TryGetValue(typeId, out var name)
+            && !string.IsNullOrWhiteSpace(name)
+            && !name.StartsWith("#", StringComparison.Ordinal))
+            return name;
+        return "#" + typeId.ToString(CultureInfo.InvariantCulture);
+    }
 
     private static async Task EnsureColumnAsync(SqliteConnection conn, string table, string column, string type, CancellationToken ct)
     {

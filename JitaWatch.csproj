@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);publish/**;data/**</DefaultItemExcludes>
+    <!-- иначе dotnet publish -o publish тащит старый publish внутрь себя матрёшкой -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish/**;publish\**;data/**;data\**;tools/**;tools\**</DefaultItemExcludes>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,6 +13,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <Content Remove="publish\**;data\**;tools\**" />
+    <None Remove="publish\**;data\**;tools\**" />
   </ItemGroup>
 
 </Project>

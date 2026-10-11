@@ -319,9 +319,9 @@ public sealed class CollectorService : BackgroundService
         var cosmetics = await _db.RejectNamedAsync(IsCosmetic, "cosmetic", today, ct);
         if (cosmetics > 0)
             _log.LogInformation("Украшения убраны из загрузки: {Count}", cosmetics);
-        var named = await _db.LatestTypeIdsAsync(ct);
-        if (named.Count > 0)
-            await FetchNamesAsync(named, ct);
+        var needNames = await _db.TypesNeedingNamesAsync(ct);
+        if (needNames.Count > 0)
+            await FetchNamesAsync(needNames, ct);
 
         var history = await _db.TypesNeedingHistoryAsync(today, ct);
         if (history.Count > 0)
@@ -339,6 +339,11 @@ public sealed class CollectorService : BackgroundService
         var needVol = await _db.TypesMissingVolumeAsync(400, ct);
         if (needVol.Count > 0)
             await FetchVolumesAsync(needVol, ct);
+
+        // объём мог создать строки с заглушкой #id — добираем имена развоза
+        needNames = await _db.TypesNeedingNamesAsync(ct);
+        if (needNames.Count > 0)
+            await FetchNamesAsync(needNames, ct);
 
         if (Volatile.Read(ref _ordersRunning) == 0)
             await _db.SetStatusAsync("idle", "имена и история обновлены", null, ct);

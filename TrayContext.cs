@@ -5,24 +5,45 @@ internal sealed class TrayContext : ApplicationContext
     private readonly NotifyIcon _icon;
     private readonly WebApplication _app;
     private readonly System.Windows.Forms.Timer _timer;
+    private readonly ToolStripMenuItem _notifyItem;
     private int _shouted;
+    private bool _notifyEarn = true;
+    private bool _loadingNotify;
 
     public TrayContext(WebApplication app)
     {
         _app = app;
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Открыть", null, (_, _) => OpenPanel());
-        menu.Items.Add("Сигнал", null, (_, _) => OpenSignal());
-        menu.Items.Add("Выход", null, (_, _) => ExitThread());
-
         var iconPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "favicon.ico");
         _icon = new NotifyIcon
         {
             Icon = new Icon(iconPath),
             Visible = true,
-            Text = "MK Jitawatch",
-            ContextMenuStrip = menu
+            Text = "MK Jitawatch"
         };
+
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Открыть", null, (_, _) => OpenPanel());
+        menu.Items.Add("Сигнал", null, (_, _) => OpenSignal());
+        _notifyItem = new ToolStripMenuItem("Оповещения о заработке")
+        {
+            CheckOnClick = true,
+            Checked = true
+        };
+        _notifyItem.CheckedChanged += (_, _) =>
+        {
+            if (_loadingNotify)
+                return;
+            _notifyEarn = _notifyItem.Checked;
+            if (_notifyEarn)
+                _shouted = 0;
+            _ = SaveNotifyAsync(_notifyEarn);
+            if (!_notifyEarn)
+                _icon.Text = "MK Jitawatch";
+        };
+        menu.Items.Add(_notifyItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Выход", null, (_, _) => ExitThread());
+        _icon.ContextMenuStrip = menu;
         _icon.DoubleClick += (_, _) => OpenPanel();
         _icon.BalloonTipClicked += (_, _) => OpenSignal();
 
@@ -34,6 +55,52 @@ internal sealed class TrayContext : ApplicationContext
             _ = PollSignalAsync();
         };
         _timer.Start();
+        _ = LoadNotifyAsync();
+    }
+
+    private async Task LoadNotifyAsync()
+    {
+        try
+        {
+            var db = _app.Services.GetRequiredService<MarketDb>();
+            var on = await db.GetTrayNotifyAsync();
+            void apply() => ApplyNotifyFlag(on);
+            if (_icon.ContextMenuStrip is { InvokeRequired: true } strip)
+                strip.BeginInvoke(apply);
+            else
+                apply();
+        }
+        catch
+        {
+            // дефолт включено
+        }
+    }
+
+    private void ApplyNotifyFlag(bool on)
+    {
+        _loadingNotify = true;
+        try
+        {
+            _notifyEarn = on;
+            if (_notifyItem.Checked != on)
+                _notifyItem.Checked = on;
+        }
+        finally
+        {
+            _loadingNotify = false;
+        }
+    }
+
+    private async Task SaveNotifyAsync(bool enabled)
+    {
+        try
+        {
+            var db = _app.Services.GetRequiredService<MarketDb>();
+            await db.SetTrayNotifyAsync(enabled);
+        }
+        catch
+        {
+        }
     }
 
     private async Task PollSignalAsync()
@@ -45,6 +112,13 @@ internal sealed class TrayContext : ApplicationContext
             if (signal is null)
                 return;
             var shout = signal.Tone == "shout";
+            if (!_notifyEarn)
+            {
+                _icon.Text = "MK Jitawatch";
+                _shouted = shout ? signal.Shown : 0;
+                return;
+            }
+
             _icon.Text = shout ? "Есть шанс заработать" : "MK Jitawatch";
             if (shout && signal.Shown > _shouted)
             {
