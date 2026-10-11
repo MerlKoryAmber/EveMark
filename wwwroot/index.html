@@ -349,15 +349,15 @@
                   </tr>
                   <tr class="filters">
                     <th class="left name"><input class="col-filter" data-f="name" type="search" aria-label="Предмет"></th>
-                    <th class="money"><span class="range"><input class="col-filter" data-f="bestBuyMin" type="search" placeholder="от" aria-label="Покупка от"><input class="col-filter" data-f="bestBuyMax" type="search" placeholder="до" aria-label="Покупка до"></span></th>
-                    <th class="money"><span class="range"><input class="col-filter" data-f="bestSellMin" type="search" placeholder="от" aria-label="Продажа от"><input class="col-filter" data-f="bestSellMax" type="search" placeholder="до" aria-label="Продажа до"></span></th>
-                    <th class="money"><span class="range"><input class="col-filter" data-f="marginIskMin" type="search" placeholder="от" aria-label="Маржа от"><input class="col-filter" data-f="marginIskMax" type="search" placeholder="до" aria-label="Маржа до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="bestBuyMin" data-g="1" type="search" placeholder="от" aria-label="Покупка от"><input class="col-filter" data-f="bestBuyMax" data-g="1" type="search" placeholder="до" aria-label="Покупка до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="bestSellMin" data-g="1" type="search" placeholder="от" aria-label="Продажа от"><input class="col-filter" data-f="bestSellMax" data-g="1" type="search" placeholder="до" aria-label="Продажа до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="marginIskMin" data-g="1" type="search" placeholder="от" aria-label="Маржа от"><input class="col-filter" data-f="marginIskMax" data-g="1" type="search" placeholder="до" aria-label="Маржа до"></span></th>
                     <th class="pct"><span class="range"><input class="col-filter" data-f="marginFracMin" type="search" placeholder="от" aria-label="Процент от"><input class="col-filter" data-f="marginFracMax" type="search" placeholder="до" aria-label="Процент до"></span></th>
-                    <th class="compact"><span class="range"><input class="col-filter" data-f="dailyVolumeMin" type="search" placeholder="от" aria-label="Объём от"><input class="col-filter" data-f="dailyVolumeMax" type="search" placeholder="до" aria-label="Объём до"></span></th>
-                    <th class="money"><span class="range"><input class="col-filter" data-f="dailyIskMin" type="search" placeholder="от" aria-label="Оценка от"><input class="col-filter" data-f="dailyIskMax" type="search" placeholder="до" aria-label="Оценка до"></span></th>
-                    <th class="compact"><span class="range"><input class="col-filter" data-f="hoursMin" type="search" placeholder="от" aria-label="Часов от"><input class="col-filter" data-f="hoursMax" type="search" placeholder="до" aria-label="Часов до"></span></th>
-                    <th class="compact"><span class="range"><input class="col-filter" data-f="buyVolumeMin" type="search" placeholder="от" aria-label="На покупке от"><input class="col-filter" data-f="buyVolumeMax" type="search" placeholder="до" aria-label="На покупке до"></span></th>
-                    <th class="compact"><span class="range"><input class="col-filter" data-f="sellVolumeMin" type="search" placeholder="от" aria-label="На продаже от"><input class="col-filter" data-f="sellVolumeMax" type="search" placeholder="до" aria-label="На продаже до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="dailyVolumeMin" data-g="1" type="search" placeholder="от" aria-label="Объём от"><input class="col-filter" data-f="dailyVolumeMax" data-g="1" type="search" placeholder="до" aria-label="Объём до"></span></th>
+                    <th class="money"><span class="range"><input class="col-filter" data-f="dailyIskMin" data-g="1" type="search" placeholder="от" aria-label="Оценка от"><input class="col-filter" data-f="dailyIskMax" data-g="1" type="search" placeholder="до" aria-label="Оценка до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="hoursMin" data-g="1" type="search" placeholder="от" aria-label="Часов от"><input class="col-filter" data-f="hoursMax" data-g="1" type="search" placeholder="до" aria-label="Часов до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="buyVolumeMin" data-g="1" type="search" placeholder="от" aria-label="На покупке от"><input class="col-filter" data-f="buyVolumeMax" data-g="1" type="search" placeholder="до" aria-label="На покупке до"></span></th>
+                    <th class="compact"><span class="range"><input class="col-filter" data-f="sellVolumeMin" data-g="1" type="search" placeholder="от" aria-label="На продаже от"><input class="col-filter" data-f="sellVolumeMax" data-g="1" type="search" placeholder="до" aria-label="На продаже до"></span></th>
                   </tr>
                 </thead>
                 <tbody id="body"></tbody>
@@ -551,6 +551,32 @@
       return new Date(iso).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) + " МСК";
     }
 
+    function paintGrouped(input) {
+      if (!input.dataset.g) return;
+      const raw = input.value;
+      const end = input.selectionStart ?? raw.length;
+      const digitsBefore = raw.slice(0, end).replace(/\D/g, "").length;
+      const compact = raw.replace(/[\s\u00a0\u202f]/g, "");
+      if (!/^\d+$/.test(compact)) return;
+      const grouped = iskWhole.format(Number(compact));
+      if (grouped === raw) return;
+      input.value = grouped;
+      let seen = 0;
+      let pos = grouped.length;
+      for (let i = 0; i < grouped.length; i++) {
+        if (/\d/.test(grouped[i])) seen++;
+        if (seen >= digitsBefore) { pos = i + 1; break; }
+      }
+      input.setSelectionRange(pos, pos);
+    }
+
+    function filterText(input) {
+      const value = input.value.trim();
+      if (!input.dataset.g) return value;
+      const compact = value.replace(/[\s\u00a0\u202f]/g, "");
+      return /^\d+$/.test(compact) ? compact : value;
+    }
+
     function cell(value, kind) {
       if (value == null || value === "") return "—";
       if (kind === "pct") return pct.format(value);
@@ -630,7 +656,7 @@
       });
       let any = false;
       document.querySelectorAll("#view-board .col-filter").forEach(input => {
-        const value = input.value.trim();
+        const value = filterText(input);
         if (!value) return;
         params.set(input.dataset.f, value);
         any = true;
@@ -664,7 +690,7 @@
       });
       let any = false;
       document.querySelectorAll("#view-signal .col-filter").forEach(input => {
-        const value = input.value.trim();
+        const value = filterText(input);
         if (!value) return;
         params.set(input.dataset.f, value);
         any = true;
@@ -726,9 +752,10 @@
         const fh = document.createElement("th");
         if (kind === "text") fh.classList.add("left", "name");
         else if (width) fh.classList.add(width);
+        const group = kind === "isk" || kind === "num" ? ` data-g="1"` : "";
         fh.innerHTML = kind === "text"
           ? `<input class="col-filter" data-f="${key}" type="search" aria-label="${title}">`
-          : `<span class="range"><input class="col-filter" data-f="${key}Min" type="search" placeholder="от" aria-label="${title} от"><input class="col-filter" data-f="${key}Max" type="search" placeholder="до" aria-label="${title} до"></span>`;
+          : `<span class="range"><input class="col-filter" data-f="${key}Min"${group} type="search" placeholder="от" aria-label="${title} от"><input class="col-filter" data-f="${key}Max"${group} type="search" placeholder="до" aria-label="${title} до"></span>`;
         filters.appendChild(fh);
       }
     }
@@ -795,6 +822,7 @@
     });
     document.getElementById("signal-table").addEventListener("input", event => {
       if (!event.target.classList.contains("col-filter")) return;
+      paintGrouped(event.target);
       signalPage = 1;
       clearTimeout(signalSearchTimer);
       signalSearchTimer = setTimeout(() => { loadSignals().catch(() => {}); }, 300);
@@ -811,6 +839,7 @@
     });
     document.querySelectorAll("#view-board .col-filter").forEach(input => {
       input.addEventListener("input", () => {
+        paintGrouped(input);
         page = 1;
         clearTimeout(searchTimer);
         searchTimer = setTimeout(() => { tick().catch(() => {}); }, 300);

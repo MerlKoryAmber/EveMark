@@ -1,3 +1,5 @@
-# Скелет EveMark
+# Скелет и метод EveMark
 
-Перед задачей читать `docs/SKELETON.md`. После изменения структуры, схемы БД, порогов доски или сигналов обновить скелет в том же шаге. Пороги брать из скелета и кода (`SignalRule`, `FeeMath`, `CollectorService.IsCosmetic`), не из памяти.
+До правок читать по порядку: `CLAUDE.md`, `CURSOR_HANDOFF.txt`, `docs/SKELETON.md`. Пороги брать оттуда и из кода (`SignalRule`, `FeeMath`, `CollectorService.IsCosmetic`), не из памяти.
+
+После изменения структуры, схемы БД, порогов доски, сигналов или способа запуска обновить `docs/SKELETON.md` в том же шаге.

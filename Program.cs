@@ -7,7 +7,11 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        ApplicationConfiguration.Initialize();
         var home = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var dbPath = Path.Combine(home, "data", "jita.db");
+        if (!File.Exists(dbPath) && !AgreeToCreateDatabase(dbPath))
+            return;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             Args = args,
@@ -185,9 +189,28 @@ internal static class Program
             await app.WaitForShutdownAsync();
         });
 
-        ApplicationConfiguration.Initialize();
         Application.Run(new TrayContext(app));
         app.StopAsync().GetAwaiter().GetResult();
         server.Wait(TimeSpan.FromSeconds(8));
+    }
+
+    private static bool AgreeToCreateDatabase(string dbPath)
+    {
+        var answer = MessageBox.Show(
+            "Рядом с программой нет базы. Создать новую?",
+            "Jita",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (answer != DialogResult.Yes)
+            return false;
+
+        foreach (var suffix in new[] { "-wal", "-shm" })
+        {
+            var side = dbPath + suffix;
+            if (File.Exists(side))
+                File.Delete(side);
+        }
+
+        return true;
     }
 }
