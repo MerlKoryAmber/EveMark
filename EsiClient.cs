@@ -18,11 +18,12 @@ public sealed class Book
     public int SellOrders { get; private set; }
     public bool HasSell { get; private set; }
 
-    public void Add(bool isBuy, decimal price, long volume)
+    public void Add(bool isBuy, decimal price, long volume, long orderId = 0)
     {
         if (price <= 0 || volume <= 0)
             return;
         _orders.Add((isBuy, price, volume));
+        _ = orderId;
     }
 
     public void Finish()
@@ -133,7 +134,7 @@ public sealed class EsiClient
                     books[order.TypeId] = book;
                 }
 
-                book.Add(order.IsBuyOrder, order.Price, order.VolumeRemain);
+                book.Add(order.IsBuyOrder, order.Price, order.VolumeRemain, order.OrderId);
             }
 
             progress($"{regionLabel}, страница {page} из {pages}");
@@ -260,6 +261,73 @@ public sealed class EsiClient
         return string.IsNullOrWhiteSpace(dto?.Name) ? null : dto.Name;
     }
 
+    /// <summary>Ордера типа в регионе. 304 → NotModified=true, Orders пустой.</summary>
+    public async Task<TypeOrdersResult> FetchTypeOrdersAsync(
+        int regionId,
+        int typeId,
+        string? etag,
+        CancellationToken ct)
+    {
+        var url =
+            $"https://esi.evetech.net/latest/markets/{regionId}/orders/?datasource=tranquility&order_type=all&type_id={typeId.ToString(CultureInfo.InvariantCulture)}";
+        var all = new List<WatchOrderSnap>();
+        string? newEtag = etag;
+        var page = 1;
+        var pages = 1;
+        do
+        {
+            var pageUrl = page == 1
+                ? url
+                : url + "&page=" + page.ToString(CultureInfo.InvariantCulture);
+            using var req = new HttpRequestMessage(HttpMethod.Get, pageUrl);
+            if (page == 1 && !string.IsNullOrEmpty(etag))
+                req.Headers.TryAddWithoutValidation("If-None-Match", etag);
+            using var resp = await _http.SendAsync(req, ct);
+            if (page == 1 && resp.StatusCode == System.Net.HttpStatusCode.NotModified)
+                return new TypeOrdersResult(true, etag, []);
+
+            if ((int)resp.StatusCode is 420 or 429 or 502 or 503 or 504)
+            {
+                var wait = resp.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(2);
+                resp.Dispose();
+                await Task.Delay(wait, ct);
+                return await FetchTypeOrdersAsync(regionId, typeId, null, ct);
+            }
+
+            resp.EnsureSuccessStatusCode();
+            if (page == 1)
+            {
+                if (resp.Headers.ETag is { } tag)
+                    newEtag = tag.Tag;
+                else if (resp.Headers.TryGetValues("ETag", out var raw))
+                    newEtag = raw.FirstOrDefault();
+                if (resp.Headers.TryGetValues("X-Pages", out var values) &&
+                    int.TryParse(values.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                    pages = Math.Max(1, parsed);
+            }
+
+            await PauseIfNeededAsync(resp, ct);
+            var orders = await resp.Content.ReadFromJsonAsync<List<OrderDto>>(cancellationToken: ct) ?? [];
+            foreach (var order in orders)
+            {
+                if (order.VolumeRemain <= 0 || order.Price <= 0 || order.OrderId <= 0)
+                    continue;
+                all.Add(new WatchOrderSnap(
+                    order.OrderId,
+                    order.TypeId,
+                    order.LocationId,
+                    order.IsBuyOrder,
+                    order.Price,
+                    order.VolumeRemain));
+            }
+
+            page++;
+        }
+        while (page <= pages);
+
+        return new TypeOrdersResult(false, newEtag, all);
+    }
+
     public async Task<IReadOnlyList<HistoryBar>> FetchHistoryAsync(int regionId, int typeId, CancellationToken ct)
     {
         var url =
@@ -335,6 +403,9 @@ public sealed class EsiClient
 
     private sealed class OrderDto
     {
+        [JsonPropertyName("order_id")]
+        public long OrderId { get; set; }
+
         [JsonPropertyName("is_buy_order")]
         public bool IsBuyOrder { get; set; }
 
@@ -385,4 +456,6 @@ public sealed class EsiClient
 public sealed record RegionOrderScan(int RegionId, Dictionary<long, Dictionary<int, Book>> ByLocation);
 
 public sealed record StationInfo(long StationId, string Name, int SystemId);
+
+public sealed record TypeOrdersResult(bool NotModified, string? Etag, IReadOnlyList<WatchOrderSnap> Orders);
 

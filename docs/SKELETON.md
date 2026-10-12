@@ -2,10 +2,10 @@
 
 Актуальная карта. Читать перед задачей. Обновлять в том же шаге, если меняются структура, схема БД, пороги доски или сигналов.
 
-Имя на экране и в трее: MK Jitawatch. Файл exe остаётся `JitaWatch.exe`. Каталог: `C:\Code\jita-watch`. Репозиторий: https://github.com/MerlKoryAmber/EveMark. Для человека: `README.md`. Знак в шапке — `wwwroot/assets/brand-mark.png`. Вкладка и трей — готовый `wwwroot/favicon.ico` из squid-panel, он же `app.ico`.
+Имя на экране и в трее: MK Jitawatch. Файл exe остаётся `JitaWatch.exe`. Каталог: `C:\Code\jita-watch`. Репозиторий: https://github.com/MerlKoryAmber/EveMark. Для человека: `README.md` (кратко) и `docs/OPISANIE.md` (подробно зачем и что умеет). Знак в шапке — `wwwroot/assets/brand-mark.png`. Вкладка и трей — готовый `wwwroot/favicon.ico` из squid-panel, он же `app.ico`.
 
 ## Статус
-Локальный стол Jita 4-4 работает (релиз 0.2.2). Ордера только читаются, заявки не ставятся. Кнопка «Снять сейчас» сразу пишет статус `orders` / «запуск съёма…» и крутит опрос, пока съём не кончится. Приёмку ставит человек.
+Локальный стол работает (после 0.2.2: слежение 5 мин, медиана 7д, доля захвата, станционные fills). Ордера только читаются. Приёмку ставит человек.
 
 Хвост: история ESI для type 62593 отвечает 400, тип не помечается `no_trade`, запрос повторяется.
 
@@ -14,8 +14,9 @@
 |------|------|
 | `Program.cs` | Kestrel `http://127.0.0.1:8741`, корень контента = каталог exe |
 | `CollectorService.cs` | Часовой снимок, имена, история, отсев украшений |
-| `EsiClient.cs` | ESI: ордера The Forge, история, имена |
-| `MarketDb.cs` | SQLite, доска, сигналы, `SignalRule` |
+| `WatchPollService.cs` | Watchlist каждые `WatchPollMinutes` (5), ETag, fills / price_mover |
+| `EsiClient.cs` | ESI: регионы, type orders+ETag, история, имена |
+| `MarketDb.cs` / `MarketDb.Watch.cs` | SQLite, доска, сигналы, watchlist |
 | `FeeMath.cs` | Налог, брокер, маржа |
 | `FileLog.cs` | Лог в `data/jita.log`, обрезка на 2 МБ, хвост 512 КБ |
 | `TrayContext.cs` | Трей: Открыть / Сигнал / «Оповещения о заработке» / Выход. Шарик «Крик» отключается галкой (`setting.tray_notify`) |
@@ -40,7 +41,7 @@
 - В базе по типу на доске: лучшая покупка = max buy, лучшая продажа = min sell.
 - Объём и число ордеров — внутри 1% от лучшей цены. Покупка: цена ≥ bestBuy×0.99. Продажа: цена ≤ bestSell×1.01.
 - Продажа дешевле 1 000 000 ISK не пишется.
-- Объём/сутки — последний полный день ESI (`day < сегодня UTC`), обычно вчера; если CCP ещё не отдал вчера — берётся предыдущий. Иначе сигнал обнулялся после полуночи UTC. Оценка = маржа × min(этот объём, полосы 1%). При смене UTC-дня — EnsureSync истории.
+- Объём/сутки на закупе = **медиана** ESI The Forge за до 7 полных дней; оценка = маржа × min(медиана×доля_захвата, полосы 1%). Доля = 1/число уникальных order_id из `price_mover` за ~6 ч (иначе max ордеров в полосе). Станционный объём 24ч — `watch_fill`. Watchlist: таблицы `watchlist`, `watch_order`, `watch_fill`, `price_mover`, `esi_etag`. API: `GET|POST|DELETE /api/watch`, `POST /api/watch/poll`.
 - Имена: sync тянет ESI `/universe/names` для типов закупа и развоза без имени или с заглушкой `#id`. Пока имени нет — в таблице `#typeId`, не голый номер.
 - Часы — подряд идущие снимки с маржой > 0 и обеими сторонами ≥ 2 шт. Разрыв > 90 минут рвёт серию.
 - Доска не показывает маржу выше 5 000% от покупки. Кнопка «Столбцы» на закупе и в сигнале прячет столбец вместе с фильтром. Выбор хранится в браузере.
@@ -71,7 +72,7 @@
 Украшение (`CollectorService.IsCosmetic`): имя содержит ` SKIN`; начинается с `Men's ` / `Women's ` / `Camo`; содержит `Apparel` или `Cybernetic Arm`; отдельное слово Jacket, Boots, Suit, Beret, Goggles, Glasses, Mask, Outfit, Scarf, Shoes, Hoodie, Shirt, Pants, Dress, Skirt, Blouse, T-Shirt, Camo, Pattern, Patterns. Не режутся Target Painter, Cap Recharger, Coating, Sequencer, Yellowjacket, Suite, Boots.ini.
 
 ## База
-SQLite WAL. Деньги в TEXT. Таблицы: `snapshot`, `quote`, `type_name`, `daily_history`, `history_sync`, `setting`, `reject`, `status`. Срок хранения 1–400 дней, по умолчанию 120 (`setting.keep_days`). Чистка после снимка без VACUUM. Сохранение настроек чистит и делает VACUUM.
+SQLite WAL. Деньги в TEXT. Таблицы: `snapshot`, `quote`, `type_name`, `daily_history`, `history_sync`, `setting`, `reject`, `status`, `location_*`, `watchlist`, `watch_order`, `watch_fill`, `price_mover`, `esi_etag`. Срок хранения 1–400 дней, по умолчанию 120 (`setting.keep_days`). Чистка после снимка без VACUUM. Сохранение настроек чистит и делает VACUUM.
 
 ## API
-`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`.
+`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`, `GET|POST|DELETE /api/watch`, `POST /api/watch/poll`.

@@ -14,4 +14,10 @@ public sealed class MarketOptions
     public int PollHours { get; set; } = 1;
 
     public int KeepDays { get; set; } = 120;
+
+    /// <summary>Интервал опроса watchlist (минуты).</summary>
+    public int WatchPollMinutes { get; set; } = 5;
+
+    /// <summary>Окно часов для подсчёта конкурентов (уникальные order_id, двигавшие лучшую цену).</summary>
+    public int CaptureHours { get; set; } = 6;
 }

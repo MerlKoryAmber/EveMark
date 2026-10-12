@@ -36,6 +36,8 @@ internal static class Program
         });
         builder.Services.AddSingleton<CollectorService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<CollectorService>());
+        builder.Services.AddSingleton<WatchPollService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<WatchPollService>());
 
         var app = builder.Build();
         app.Services.GetRequiredService<MarketDb>().InitAsync().GetAwaiter().GetResult();
@@ -82,6 +84,24 @@ internal static class Program
             if (!await collector.TriggerAsync())
                 return Results.Conflict(new { started = false, error = "Снятие уже идёт" });
             return Results.Json(new { started = true, state = "orders", detail = "запуск съёма…" }, statusCode: StatusCodes.Status202Accepted);
+        });
+        app.MapGet("/api/watch", (MarketDb db, CancellationToken ct) => db.ListWatchAsync(ct));
+        app.MapPost("/api/watch", async (WatchAddRequest body, MarketDb db, CancellationToken ct) =>
+        {
+            if (body.TypeId <= 0 || body.LocationId <= 0 || body.RegionId <= 0)
+                return Results.BadRequest(new { error = "Нужны typeId, locationId, regionId" });
+            await db.AddWatchAsync(body.TypeId, body.LocationId, body.RegionId, body.Note, ct);
+            return Results.Ok(await db.ListWatchAsync(ct));
+        });
+        app.MapDelete("/api/watch", async (int typeId, long locationId, MarketDb db, CancellationToken ct) =>
+        {
+            await db.RemoveWatchAsync(typeId, locationId, ct);
+            return Results.Ok(await db.ListWatchAsync(ct));
+        });
+        app.MapPost("/api/watch/poll", async (WatchPollService poll, CancellationToken ct) =>
+        {
+            await poll.PollOnceAsync(ct);
+            return Results.Accepted();
         });
         app.MapGet("/api/signals", (
             MarketDb db,
@@ -258,6 +278,8 @@ internal static class Program
         app.StopAsync().GetAwaiter().GetResult();
         server.Wait(TimeSpan.FromSeconds(8));
     }
+
+    private sealed record WatchAddRequest(int TypeId, long LocationId, int RegionId, string? Note);
 
     private static bool AgreeToCreateDatabase(string dbPath)
     {

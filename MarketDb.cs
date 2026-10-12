@@ -25,6 +25,20 @@ public sealed record BoardRow
     public string? VolumeDay { get; init; }
     public decimal? Average { get; init; }
     public decimal? DailyIsk { get; init; }
+    /// <summary>Медиана объёма ESI за до 7 полных дней (база для «Объём/сутки»).</summary>
+    public long? VolumeMedian7 { get; init; }
+    /// <summary>Среднее объёма за до 7 дней.</summary>
+    public long? VolumeAvg7 { get; init; }
+    /// <summary>Медиана объёма за до 30 дней.</summary>
+    public long? VolumeMedian30 { get; init; }
+    /// <summary>Доля захвата 1/конкуренты; конкуренты — уникальные order_id, двигавшие лучшую цену.</summary>
+    public decimal? CaptureShare { get; init; }
+    public int Competitors { get; init; }
+    /// <summary>Станционный объём сделок (watch fills) за 24ч UTC, buy+sell.</summary>
+    public long? StationVolume24h { get; init; }
+    public long? StationBuyFilled24h { get; init; }
+    public long? StationSellFilled24h { get; init; }
+    public bool Watched { get; init; }
     public int Hours { get; init; }
     public long BuyVolume { get; init; }
     public long SellVolume { get; init; }
@@ -192,7 +206,7 @@ public sealed record ColumnFilter(
     NumRange Days,
     NumRange DailyRoi);
 
-public sealed class MarketDb
+public sealed partial class MarketDb
 {
     private const decimal MaxBoardMarginPercent = 5000m;
     private const decimal MinHaulAsk = 500_000m;
@@ -304,6 +318,51 @@ public sealed class MarketDb
                 INSERT INTO setting (key, value) VALUES ('corp', '0') ON CONFLICT(key) DO NOTHING;
                 INSERT INTO setting (key, value) VALUES ('keep_days', '120') ON CONFLICT(key) DO NOTHING;
                 INSERT INTO setting (key, value) VALUES ('tray_notify', '1') ON CONFLICT(key) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS watchlist (
+                    type_id INTEGER NOT NULL,
+                    location_id INTEGER NOT NULL,
+                    region_id INTEGER NOT NULL,
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (type_id, location_id)
+                );
+                CREATE TABLE IF NOT EXISTS watch_order (
+                    order_id INTEGER NOT NULL,
+                    type_id INTEGER NOT NULL,
+                    location_id INTEGER NOT NULL,
+                    is_buy INTEGER NOT NULL,
+                    price TEXT NOT NULL,
+                    volume_remain INTEGER NOT NULL,
+                    seen_at TEXT NOT NULL,
+                    PRIMARY KEY (order_id)
+                );
+                CREATE INDEX IF NOT EXISTS ix_watch_order_loc ON watch_order(type_id, location_id);
+                CREATE TABLE IF NOT EXISTS watch_fill (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id INTEGER NOT NULL,
+                    type_id INTEGER NOT NULL,
+                    location_id INTEGER NOT NULL,
+                    is_buy INTEGER NOT NULL,
+                    price TEXT NOT NULL,
+                    volume INTEGER NOT NULL,
+                    filled_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_watch_fill_type ON watch_fill(type_id, location_id, filled_at);
+                CREATE TABLE IF NOT EXISTS price_mover (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type_id INTEGER NOT NULL,
+                    location_id INTEGER NOT NULL,
+                    side TEXT NOT NULL,
+                    order_id INTEGER NOT NULL,
+                    price TEXT NOT NULL,
+                    seen_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_price_mover_seen ON price_mover(type_id, location_id, seen_at);
+                CREATE TABLE IF NOT EXISTS esi_etag (
+                    cache_key TEXT PRIMARY KEY,
+                    etag TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """, ("$now", Stamp(DateTime.UtcNow)));
             await EnsureColumnAsync(conn, "quote", "buy_touch", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnAsync(conn, "quote", "sell_touch", "INTEGER NOT NULL DEFAULT 0", ct);
@@ -1290,26 +1349,91 @@ public sealed class MarketDb
             ? await LoadBoardQuotesAsync(conn, snapshotId, sources, ct)
             : [];
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var todayText = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var from30 = today.AddDays(-30).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var history = new Dictionary<int, Hist>();
+        var histWindows = new Dictionary<int, List<(string Day, long Vol, decimal Avg)>>();
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = """
-                SELECT h.type_id, h.day, h.volume, h.average
-                FROM daily_history h
-                JOIN (
-                    SELECT type_id, MAX(day) AS day
-                    FROM daily_history
-                    WHERE day < $today AND region_id = $forge
-                    GROUP BY type_id
-                ) m ON m.type_id = h.type_id AND m.day = h.day
-                WHERE h.region_id = $forge
+                SELECT type_id, day, volume, average
+                FROM daily_history
+                WHERE region_id = $forge AND day < $today AND day >= $from30
+                ORDER BY type_id, day
                 """;
-            cmd.Parameters.AddWithValue("$today", today);
+            cmd.Parameters.AddWithValue("$today", todayText);
+            cmd.Parameters.AddWithValue("$from30", from30);
             cmd.Parameters.AddWithValue("$forge", TradeHubs.ForgeRegionId);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
-                history[ReadInt(reader, 0)] = new Hist(reader.GetString(1), ReadLong(reader, 2), ReadDec(reader, 3));
+            {
+                var typeId = ReadInt(reader, 0);
+                var day = reader.GetString(1);
+                var vol = ReadLong(reader, 2);
+                var avg = ReadDec(reader, 3);
+                if (!histWindows.TryGetValue(typeId, out var list))
+                {
+                    list = [];
+                    histWindows[typeId] = list;
+                }
+
+                list.Add((day, vol, avg));
+            }
+        }
+
+        foreach (var (typeId, bars) in histWindows)
+        {
+            if (bars.Count == 0)
+                continue;
+            var last = bars[^1];
+            history[typeId] = new Hist(last.Day, last.Vol, last.Avg);
+        }
+
+        var watchedTypes = new HashSet<int>();
+        await using (var wcmd = conn.CreateCommand())
+        {
+            wcmd.CommandText = "SELECT DISTINCT type_id FROM watchlist";
+            await using var wr = await wcmd.ExecuteReaderAsync(ct);
+            while (await wr.ReadAsync(ct))
+                watchedTypes.Add(ReadInt(wr, 0));
+        }
+
+        var fills = new Dictionary<int, (long Buy, long Sell)>();
+        var sinceFill = Stamp(DateTime.UtcNow.AddHours(-24));
+        await using (var fcmd = conn.CreateCommand())
+        {
+            fcmd.CommandText = """
+                SELECT type_id, is_buy, SUM(volume)
+                FROM watch_fill WHERE filled_at >= $since
+                GROUP BY type_id, is_buy
+                """;
+            fcmd.Parameters.AddWithValue("$since", sinceFill);
+            await using var fr = await fcmd.ExecuteReaderAsync(ct);
+            while (await fr.ReadAsync(ct))
+            {
+                var tid = ReadInt(fr, 0);
+                var isBuy = fr.GetInt64(1) != 0;
+                var vol = ReadLong(fr, 2);
+                fills.TryGetValue(tid, out var cur);
+                fills[tid] = isBuy ? (cur.Buy + vol, cur.Sell) : (cur.Buy, cur.Sell + vol);
+            }
+        }
+
+        var competitors = new Dictionary<int, int>();
+        var sinceMove = Stamp(DateTime.UtcNow.AddHours(-6));
+        await using (var ccmd = conn.CreateCommand())
+        {
+            ccmd.CommandText = """
+                SELECT type_id, COUNT(DISTINCT order_id)
+                FROM price_mover
+                WHERE seen_at >= $since AND order_id > 0
+                GROUP BY type_id
+                """;
+            ccmd.Parameters.AddWithValue("$since", sinceMove);
+            await using var cr = await ccmd.ExecuteReaderAsync(ct);
+            while (await cr.ReadAsync(ct))
+                competitors[ReadInt(cr, 0)] = ReadInt(cr, 1);
         }
 
         var ranked = new List<BoardRow>();
@@ -1321,12 +1445,35 @@ public sealed class MarketDb
             if (margin <= 0)
                 continue;
             history.TryGetValue(quote.TypeId, out var hist);
-            var hasVolumeDay = hist is not null;
+            histWindows.TryGetValue(quote.TypeId, out var bars);
+            var vols7 = bars?.TakeLast(7).Select(b => b.Vol).ToList() ?? [];
+            var vols30 = bars?.Select(b => b.Vol).ToList() ?? [];
+            var median7 = MedianLong(vols7);
+            var avg7 = vols7.Count > 0 ? (long)vols7.Average() : (long?)null;
+            var median30 = MedianLong(vols30);
+            var volumeForEstimate = median7 ?? (hist?.Volume);
+            var volumeDay = median7 is not null ? "median7" : hist?.Day;
             var pile = Math.Min(quote.BuyVolume, quote.SellVolume);
-            var depth = hasVolumeDay
-                ? Math.Min(hist!.Volume, pile)
+            competitors.TryGetValue(quote.TypeId, out var movers);
+            var rivals = movers > 0
+                ? movers
+                : Math.Max(1, Math.Max(quote.BuyOrders, quote.SellOrders));
+            if (rivals < 1)
+                rivals = 1;
+            var share = 1m / rivals;
+            long? captureVol = volumeForEstimate is long v
+                ? Math.Max(1, (long)Math.Floor(v * (double)share))
+                : null;
+            var depth = captureVol is long cap
+                ? Math.Min(cap, pile)
                 : (long?)null;
             var capital = pile > 0 ? buy * pile : (decimal?)null;
+            fills.TryGetValue(quote.TypeId, out var fill);
+            var stationBuy = fill.Buy > 0 ? fill.Buy : (long?)null;
+            var stationSell = fill.Sell > 0 ? fill.Sell : (long?)null;
+            long? stationTotal = stationBuy is null && stationSell is null
+                ? null
+                : (stationBuy ?? 0) + (stationSell ?? 0);
             ranked.Add(new BoardRow
             {
                 TypeId = quote.TypeId,
@@ -1335,10 +1482,19 @@ public sealed class MarketDb
                 BestSell = quote.BestSell,
                 MarginIsk = margin,
                 MarginFrac = fraction,
-                DailyVolume = hasVolumeDay ? hist!.Volume : null,
-                VolumeDay = hasVolumeDay ? hist!.Day : null,
-                Average = hasVolumeDay ? hist!.Average : null,
+                DailyVolume = volumeForEstimate,
+                VolumeDay = volumeDay,
+                Average = hist?.Average,
                 DailyIsk = depth is null ? null : margin * depth.Value,
+                VolumeMedian7 = median7,
+                VolumeAvg7 = avg7,
+                VolumeMedian30 = median30,
+                CaptureShare = share,
+                Competitors = rivals,
+                StationVolume24h = stationTotal,
+                StationBuyFilled24h = stationBuy,
+                StationSellFilled24h = stationSell,
+                Watched = watchedTypes.Contains(quote.TypeId),
                 Hours = 0,
                 BuyVolume = quote.BuyVolume,
                 SellVolume = quote.SellVolume,
@@ -1348,12 +1504,23 @@ public sealed class MarketDb
                 SellTouch = quote.SellTouch > 0 ? quote.SellTouch : null,
                 Relists = FeeMath.Relists(margin, quote.BestSell, fees.BrokerFee),
                 Capital = capital,
-                Days = hasVolumeDay && hist!.Volume > 0 && pile > 0 ? pile / (decimal)hist.Volume : null,
+                Days = volumeForEstimate is > 0 && pile > 0 ? pile / (decimal)volumeForEstimate.Value : null,
                 DailyRoi = capital is > 0 && depth is not null ? margin * depth.Value / capital.Value : null
             });
         }
 
         return new RankedLoad(fees, takenAt, raw.Count, snapshots, ranked);
+    }
+
+    private static long? MedianLong(List<long> values)
+    {
+        if (values.Count == 0)
+            return null;
+        var sorted = values.OrderBy(v => v).ToList();
+        var mid = sorted.Count / 2;
+        return sorted.Count % 2 == 1
+            ? sorted[mid]
+            : (sorted[mid - 1] + sorted[mid]) / 2;
     }
 
     private static async Task<List<RawQuote>> LoadBoardQuotesAsync(

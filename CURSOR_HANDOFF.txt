@@ -1,8 +1,10 @@
-MK Jitawatch — локальный стол Jita 4-4. Exe: JitaWatch.exe. Карта: docs/SKELETON.md
+MK Jitawatch — локальный стол. Exe: JitaWatch.exe. Карта: docs/SKELETON.md. Для человека: docs/OPISANIE.md
 
 Репозиторий: https://github.com/MerlKoryAmber/EveMark
 Каталог: C:\Code\jita-watch
-Живой процесс: publish\JitaWatch.exe, http://127.0.0.1:8741, база publish\data\jita.db
+Живой: publish\JitaWatch.exe, http://127.0.0.1:8741, data\jita.db
 
-Сейчас: фикс сигнала — объём = последний день ESI (< сегодня UTC), sync на смене суток. Не в релизе. Метод: CLAUDE.md. Приёмки нет.
-Хвост: ESI history 400 на type 62593. Структуры Perimeter без SSO не резолвятся.
+Сейчас: slice «слежение» в коде — WatchPollService 5 мин + ETag, fills по дельте ордеров, медиана 7д и доля захвата на закупе, UI «Слежение», OPISANIE/SKELETON обновлены. Сборка/publish — проверить. Коммит/релиз не делались. Приёмки нет.
+Хвост: ESI history 400 type 62593. Цитадели Perimeter без SSO. Дальше по плану владельца: портфель/слоты, развоз-pro, контракты…
+
+Идеи / на потом: см. предыдущий бэклог (rolling 24ч, keep_days, SSO, бэктест Крик).

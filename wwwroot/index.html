@@ -403,6 +403,7 @@
         <button class="nav-item active" type="button" data-view="board">Закуп</button>
         <button class="nav-item" type="button" data-view="signal">Сигнал</button>
         <button class="nav-item" type="button" data-view="haul">Развоз</button>
+        <button class="nav-item" type="button" data-view="watch">Слежение</button>
         <button class="nav-item" type="button" data-view="fees">Настройки</button>
       </nav>
       <div class="sidebar-foot">Jita + Perimeter · хабы · снимок раз в час</div>
@@ -439,7 +440,10 @@
                     <th data-k="marginIsk">Маржа</th>
                     <th data-k="marginFrac">%</th>
                     <th data-k="dailyVolume">Объём/сутки</th>
-                    <th class="sorted" data-k="dailyIsk" title="Маржа × минимум из вчерашнего объёма и обеих полос 1%">Оценка/сутки</th>
+                    <th data-k="competitors">Конкур.</th>
+                    <th data-k="captureShare">Доля</th>
+                    <th data-k="stationVolume24h">Станция 24ч</th>
+                    <th class="sorted" data-k="dailyIsk" title="Маржа × min(доля×медиана7д, полосы 1%)">Оценка/сутки</th>
                     <th data-k="hours">Часов</th>
                     <th data-k="relists" title="Сколько раз можно опустить продажу, пока маржа не кончится. Advanced Broker Relations 0: плата 50% брокерской от цены продажи. Минимум 100 ISK за приказ в это число не входит.">Перестановок</th>
                     <th data-k="buyVolume" title="Объём и ордера в пределах 1% от лучшей цены покупки">На покупке</th>
@@ -457,6 +461,9 @@
                     <th class="money"><span class="range"><input class="col-filter" data-f="marginIskMin" data-g="1" type="search" placeholder="от" aria-label="Маржа от"><input class="col-filter" data-f="marginIskMax" data-g="1" type="search" placeholder="до" aria-label="Маржа до"></span></th>
                     <th class="pct"><span class="range"><input class="col-filter" data-f="marginFracMin" type="search" placeholder="от" aria-label="Процент от"><input class="col-filter" data-f="marginFracMax" type="search" placeholder="до" aria-label="Процент до"></span></th>
                     <th class="compact"><span class="range"><input class="col-filter" data-f="dailyVolumeMin" data-g="1" type="search" placeholder="от" aria-label="Объём от"><input class="col-filter" data-f="dailyVolumeMax" data-g="1" type="search" placeholder="до" aria-label="Объём до"></span></th>
+                    <th class="compact"></th>
+                    <th class="pct"></th>
+                    <th class="compact"></th>
                     <th class="money"><span class="range"><input class="col-filter" data-f="dailyIskMin" data-g="1" type="search" placeholder="от" aria-label="Оценка от"><input class="col-filter" data-f="dailyIskMax" data-g="1" type="search" placeholder="до" aria-label="Оценка до"></span></th>
                     <th class="compact"><span class="range"><input class="col-filter" data-f="hoursMin" data-g="1" type="search" placeholder="от" aria-label="Часов от"><input class="col-filter" data-f="hoursMax" data-g="1" type="search" placeholder="до" aria-label="Часов до"></span></th>
                     <th class="compact"><span class="range"><input class="col-filter" data-f="relistsMin" data-g="1" type="search" placeholder="от" aria-label="Перестановок от"><input class="col-filter" data-f="relistsMax" data-g="1" type="search" placeholder="до" aria-label="Перестановок до"></span></th>
@@ -595,6 +602,54 @@
         </div>
       </section>
 
+      <section class="view" id="view-watch" hidden>
+        <div class="toolbar">
+          <button id="watch-poll" class="btn btn-secondary" type="button">Опросить сейчас</button>
+          <span class="toolbar-hint">Список опрашивается каждые 5 мин (ETag). По дельте volume_remain считаются сделки на станции.</span>
+        </div>
+        <div class="work work-scroll">
+          <div class="card">
+            <h3>Добавить в слежение</h3>
+            <div class="fields">
+              <label class="field">typeId
+                <input id="watch-type" type="number" min="1" step="1">
+              </label>
+              <label class="field">Станция
+                <select id="watch-hub">
+                  <option value="jita">Jita 4-4</option>
+                  <option value="amarr">Amarr</option>
+                  <option value="dodixie">Dodixie</option>
+                  <option value="rens">Rens</option>
+                  <option value="hek">Hek</option>
+                </select>
+              </label>
+              <label class="field">Заметка
+                <input id="watch-note" type="text" maxlength="120">
+              </label>
+            </div>
+            <p style="margin-top:12px"><button id="watch-add" class="btn" type="button">Добавить</button></p>
+            <p class="form-msg" id="watch-msg"></p>
+          </div>
+          <div class="table-wrap">
+            <div class="table-scroll">
+              <table class="data">
+                <thead>
+                  <tr class="cols">
+                    <th class="left">Предмет</th>
+                    <th class="left">Станция</th>
+                    <th>typeId</th>
+                    <th class="left">Заметка</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="watch-body"></tbody>
+              </table>
+              <div class="empty" id="watch-empty" hidden>Список пуст — добавьте типы для станционного объёма и доли захвата.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-fees" hidden>
         <div class="toolbar">
           <button id="save" class="btn" type="button">Сохранить</button>
@@ -647,7 +702,14 @@
     const isk = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
     const iskWhole = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
     const pct = new Intl.NumberFormat("ru-RU", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const titles = { board: "Закуп", signal: "Сигнал", haul: "Развоз", fees: "Настройки" };
+    const titles = { board: "Закуп", signal: "Сигнал", haul: "Развоз", watch: "Слежение", fees: "Настройки" };
+    const watchHubs = {
+      jita: { locationId: 60003760, regionId: 10000002 },
+      amarr: { locationId: 60008494, regionId: 10000043 },
+      dodixie: { locationId: 60011866, regionId: 10000032 },
+      rens: { locationId: 60004588, regionId: 10000030 },
+      hek: { locationId: 60005686, regionId: 10000042 }
+    };
     const hiddenBoard = readHidden("jita-cols-board");
     const hiddenHaul = readHidden("jita-cols-haul");
     const hiddenSignal = {
@@ -713,8 +775,11 @@
       bestSell: "Самая низкая цена, по которой в Jita 4-4 прямо сейчас продают одну штуку.",
       marginIsk: "Сколько ISK останется с одной штуки, если купить и сразу продать. Налог и брокерская уже вычтены.",
       marginFrac: "Та же маржа в процентах от денег, которые уйдут на покупку.",
-      dailyVolume: "Сколько штук продали за последний полный день ESI по The Forge (часто вчера UTC), не только на этой станции.",
-      dailyIsk: "Сколько ISK можно снять за сутки: маржа с одной штуки умножить на меньшее из объёма за тот день и того, сколько товара стоит рядом с лучшей ценой.",
+      dailyVolume: "Медиана объёма ESI The Forge за до 7 полных дней (не один шумный день).",
+      competitors: "Сколько уникальных ордеров двигали лучшую цену за ~6 ч (из слежения). Иначе оценка по числу ордеров в полосе 1%.",
+      captureShare: "Доля захвата: 1 / конкуренты. Оценка не забирает весь дневной объём одному.",
+      stationVolume24h: "Сделки на станции за 24 ч по дельте volume_remain (только типы из слежения).",
+      dailyIsk: "Маржа × min(медиана7д × доля захвата, глубина полос 1%).",
       hours: "Сколько часов подряд разница цен держалась, и с обеих сторон было хотя бы две штуки. Пропуск больше полутора часов обнуляет счёт.",
       thin: "Какой стороны мало. «покупка» — купить легко, продать труднее: желающих купить вдвое меньше. «продажа» — наоборот. Пустая ячейка — стороны примерно равны.",
       average: "Средняя цена вчерашних сделок по The Forge. В этом списке она не между текущей покупкой и продажей: вчера торговали заметно иначе, чем вилка сейчас.",
@@ -904,6 +969,9 @@
           `<td>${cell(r.marginIsk, "isk")}</td>` +
           `<td>${cell(r.marginFrac, "pct")}</td>` +
           `<td title="${r.volumeDay || ""}">${cell(r.dailyVolume, "num")}</td>` +
+          `<td>${cell(r.competitors, "num")}</td>` +
+          `<td>${r.captureShare != null ? pct.format(r.captureShare) : "—"}</td>` +
+          `<td title="buy ${r.stationBuyFilled24h || 0} / sell ${r.stationSellFilled24h || 0}">${cell(r.stationVolume24h, "num")}</td>` +
           `<td>${cell(r.dailyIsk, "isk")}</td>` +
           `<td>${cell(r.hours, "num")}</td>` +
           `<td>${cell(r.relists, "num")}</td>` +
@@ -958,6 +1026,31 @@
       document.getElementById("backdrop").classList.remove("show");
       if (name === "signal") loadSignals().catch(() => {});
       if (name === "haul") loadHaul().catch(() => {});
+      if (name === "watch") loadWatch().catch(() => {});
+    }
+
+    async function loadWatch() {
+      const rows = await fetch("/api/watch").then(r => r.json());
+      const body = document.getElementById("watch-body");
+      const empty = document.getElementById("watch-empty");
+      body.innerHTML = "";
+      empty.hidden = rows.length > 0;
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
+          `<td class="left">${escapeHtml(r.locationName)}</td>` +
+          `<td>${r.typeId}</td>` +
+          `<td class="left">${escapeHtml(r.note || "")}</td>` +
+          `<td><button type="button" class="btn btn-secondary watch-del" data-t="${r.typeId}" data-l="${r.locationId}">Убрать</button></td>`;
+        body.appendChild(tr);
+      }
+      body.querySelectorAll(".watch-del").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          await fetch(`/api/watch?typeId=${btn.dataset.t}&locationId=${btn.dataset.l}`, { method: "DELETE" });
+          await loadWatch();
+        });
+      });
     }
 
     async function loadHaul() {
@@ -1391,7 +1484,40 @@
       document.querySelectorAll(".col-menu").forEach(menu => { menu.hidden = true; });
     });
     buildSignalHead();
+    document.getElementById("watch-add").addEventListener("click", async () => {
+      const typeId = Number(document.getElementById("watch-type").value);
+      const hub = watchHubs[document.getElementById("watch-hub").value];
+      const note = document.getElementById("watch-note").value;
+      const msg = document.getElementById("watch-msg");
+      if (!typeId || !hub) {
+        msg.textContent = "Укажите typeId";
+        msg.className = "form-msg err";
+        return;
+      }
+      const resp = await fetch("/api/watch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ typeId, locationId: hub.locationId, regionId: hub.regionId, note })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        msg.textContent = err.error || "не добавилось";
+        msg.className = "form-msg err";
+        return;
+      }
+      msg.textContent = "В списке. Опрос каждые 5 мин.";
+      msg.className = "form-msg";
+      await loadWatch();
+    });
+    document.getElementById("watch-poll").addEventListener("click", async () => {
+      const msg = document.getElementById("watch-msg");
+      msg.textContent = "Опрос…";
+      await fetch("/api/watch/poll", { method: "POST" });
+      msg.textContent = "Опрос завершён";
+      msg.className = "form-msg";
+    });
     if (location.hash === "#signal") showView("signal");
+    if (location.hash === "#watch") showView("watch");
     tick();
     setInterval(() => {
       fetch("/api/status").then(r => r.json()).then(renderStatus).catch(() => {});
