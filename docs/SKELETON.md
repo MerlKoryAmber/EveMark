@@ -75,4 +75,5 @@
 SQLite WAL. Деньги в TEXT. Таблицы: `snapshot`, `quote`, `type_name`, `daily_history`, `history_sync`, `setting`, `reject`, `status`, `location_*`, `watchlist`, `watch_order`, `watch_fill`, `price_mover`, `esi_etag`. Срок хранения 1–400 дней, по умолчанию 120 (`setting.keep_days`). Чистка после снимка без VACUUM. Сохранение настроек чистит и делает VACUUM.
 
 ## API
-`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`, `GET|POST|DELETE /api/watch`, `POST /api/watch/poll`.
+`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`, `POST /api/haul/pack`, `POST /api/portfolio`, `GET /api/contracts`, `GET|POST /api/notes`, `GET /api/backtest/shout`, `POST /api/refine`, `GET /api/refine/ores`, `GET|POST|DELETE /api/watch`, `POST /api/watch/poll`.
+Файлы: `Portfolio.cs`, `HaulPro.cs`, `Anomaly.cs`, `Refine.cs`, `MarketDb.Extra.cs`.

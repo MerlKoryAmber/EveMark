@@ -178,13 +178,64 @@ public sealed class EsiClient
 
     public async Task<int> FetchRouteJumpsAsync(int fromSystemId, int toSystemId, CancellationToken ct)
     {
+        var systems = await FetchRouteSystemsAsync(fromSystemId, toSystemId, secure: false, ct);
+        return systems is null ? 99 : Math.Max(0, systems.Count - 1);
+    }
+
+    /// <summary>null = маршрута нет (часто при flag=secure).</summary>
+    public async Task<IReadOnlyList<int>?> FetchRouteSystemsAsync(
+        int fromSystemId, int toSystemId, bool secure, CancellationToken ct)
+    {
         if (fromSystemId == toSystemId)
-            return 0;
+            return [fromSystemId];
+        var flag = secure ? "secure" : "shortest";
         var url =
-            $"https://esi.evetech.net/latest/route/{fromSystemId.ToString(CultureInfo.InvariantCulture)}/{toSystemId.ToString(CultureInfo.InvariantCulture)}/?datasource=tranquility&flag=shortest";
-        using var resp = await SendAsync(url, ct);
-        var systems = await resp.Content.ReadFromJsonAsync<List<int>>(cancellationToken: ct) ?? [];
-        return Math.Max(0, systems.Count - 1);
+            $"https://esi.evetech.net/latest/route/{fromSystemId.ToString(CultureInfo.InvariantCulture)}/{toSystemId.ToString(CultureInfo.InvariantCulture)}/?datasource=tranquility&flag={flag}";
+        using var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        if (!resp.IsSuccessStatusCode)
+        {
+            await PauseIfNeededAsync(resp, ct);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+        }
+
+        await PauseIfNeededAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<List<int>>(cancellationToken: ct) ?? [];
+    }
+
+    public async Task<IReadOnlyList<PublicContract>> FetchPublicContractsAsync(int regionId, CancellationToken ct)
+    {
+        var list = new List<PublicContract>();
+        var page = 1;
+        var pages = 1;
+        do
+        {
+            var url =
+                $"https://esi.evetech.net/latest/contracts/public/{regionId.ToString(CultureInfo.InvariantCulture)}/?datasource=tranquility&page={page.ToString(CultureInfo.InvariantCulture)}";
+            using var resp = await SendAsync(url, ct);
+            if (page == 1 && resp.Headers.TryGetValues("X-Pages", out var values) &&
+                int.TryParse(values.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                pages = Math.Clamp(parsed, 1, 5); // ограничиваем глубину
+            var rows = await resp.Content.ReadFromJsonAsync<List<PublicContract>>(cancellationToken: ct) ?? [];
+            list.AddRange(rows);
+            page++;
+        }
+        while (page <= pages);
+
+        return list;
+    }
+
+    public async Task<IReadOnlyList<ContractItem>> FetchContractItemsAsync(int contractId, CancellationToken ct)
+    {
+        var url =
+            $"https://esi.evetech.net/latest/contracts/public/items/{contractId.ToString(CultureInfo.InvariantCulture)}/?datasource=tranquility";
+        using var resp = await _http.GetAsync(url, ct);
+        if (!resp.IsSuccessStatusCode)
+            return [];
+        await PauseIfNeededAsync(resp, ct);
+        return await resp.Content.ReadFromJsonAsync<List<ContractItem>>(cancellationToken: ct) ?? [];
     }
 
     public async Task<decimal?> FetchTypeVolumeAsync(int typeId, CancellationToken ct)
@@ -458,4 +509,43 @@ public sealed record RegionOrderScan(int RegionId, Dictionary<long, Dictionary<i
 public sealed record StationInfo(long StationId, string Name, int SystemId);
 
 public sealed record TypeOrdersResult(bool NotModified, string? Etag, IReadOnlyList<WatchOrderSnap> Orders);
+
+public sealed class PublicContract
+{
+    [JsonPropertyName("contract_id")]
+    public int ContractId { get; set; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("price")]
+    public decimal Price { get; set; }
+
+    [JsonPropertyName("buyout")]
+    public decimal? Buyout { get; set; }
+
+    [JsonPropertyName("start_location_id")]
+    public long StartLocationId { get; set; }
+
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("date_expired")]
+    public DateTimeOffset? DateExpired { get; set; }
+}
+
+public sealed class ContractItem
+{
+    [JsonPropertyName("type_id")]
+    public int TypeId { get; set; }
+
+    [JsonPropertyName("quantity")]
+    public long Quantity { get; set; }
+
+    [JsonPropertyName("is_included")]
+    public bool IsIncluded { get; set; }
+
+    [JsonPropertyName("is_singleton")]
+    public bool IsSingleton { get; set; }
+}
 

@@ -65,4 +65,29 @@ public static class FeeMath
         var kept = 1m - (0.50m + 0.06m * advancedBrokerRelations);
         return kept < 0m ? 0m : kept * brokerFee;
     }
+
+    /// <summary>Доля эскроу buy-ордера при Margin Trading (L0=1, L5=0.75).</summary>
+    public static decimal MarginEscrowFraction(int marginTradingLevel)
+    {
+        var level = Math.Clamp(marginTradingLevel, 0, 5);
+        return 1m - 0.05m * level;
+    }
+
+    public static decimal BuyEscrow(decimal buyPrice, long units, int marginTradingLevel) =>
+        buyPrice * units * MarginEscrowFraction(marginTradingLevel);
+
+    /// <summary>Слоты рыночных ордеров: 5 + Trade×4 + Retail×8 + Wholesale×16 + Tycoon×32.</summary>
+    public static int MarketSlots(int trade, int retail, int wholesale, int tycoon) =>
+        5
+        + 4 * Math.Clamp(trade, 0, 5)
+        + 8 * Math.Clamp(retail, 0, 5)
+        + 16 * Math.Clamp(wholesale, 0, 5)
+        + 32 * Math.Clamp(tycoon, 0, 5);
+
+    public static decimal RelistFeePerMove(decimal sell, decimal brokerFee) =>
+        RelistRate(brokerFee) * sell;
+
+    /// <summary>Чистая маржа с учётом типичных перестановок в день.</summary>
+    public static decimal NetMarginAfterRelists(decimal margin, decimal sell, decimal brokerFee, int movesPerDay) =>
+        margin - RelistFeePerMove(sell, brokerFee) * Math.Max(0, movesPerDay);
 }

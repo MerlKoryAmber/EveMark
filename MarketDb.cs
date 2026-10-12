@@ -39,6 +39,9 @@ public sealed record BoardRow
     public long? StationBuyFilled24h { get; init; }
     public long? StationSellFilled24h { get; init; }
     public bool Watched { get; init; }
+    public bool Anomaly { get; set; }
+    /// <summary>Чистая маржа с учётом типичных перестановок (из «Дёргают»).</summary>
+    public decimal? NetMarginIsk { get; set; }
     public int Hours { get; init; }
     public long BuyVolume { get; init; }
     public long SellVolume { get; init; }
@@ -368,6 +371,13 @@ public sealed partial class MarketDb
             await EnsureColumnAsync(conn, "quote", "sell_touch", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnAsync(conn, "type_name", "volume", "TEXT", ct);
             await MigrateHistoryRegionAsync(conn, ct);
+            await ExecAsync(conn, """
+                CREATE TABLE IF NOT EXISTS type_note (
+                    type_id INTEGER PRIMARY KEY,
+                    note TEXT NOT NULL DEFAULT '',
+                    blacklisted INTEGER NOT NULL DEFAULT 0
+                );
+                """);
         }, ct);
     }
 
@@ -991,11 +1001,23 @@ public sealed partial class MarketDb
             }
 
             var candidates = load.Rows
+                .Where(row => !IsBlacklisted(conn, row.TypeId))
                 .Where(row => row.MarginFrac >= SignalRule.MinMarginFrac
                     && row.MarginFrac <= SignalRule.MaxMarginFrac
                     && row.DailyVolume >= SignalRule.MinDailyVolume)
                 .ToList();
             await FillHoursAsync(conn, candidates, load.Fees, ct);
+            if (section is "churn" or "shout")
+            {
+                foreach (var row in candidates)
+                {
+                    var moves = Math.Max(row.BuyMoves, row.SellMoves);
+                    row.NetMarginIsk = FeeMath.NetMarginAfterRelists(
+                        row.MarginIsk, row.BestSell, load.Fees.BrokerFee, moves);
+                    row.Anomaly = Anomaly.IsSuspicious(row, null);
+                }
+            }
+
             var signals = candidates.Where(row => InSection(row, section)).ToList();
             var shout = section == "shout" && signals.Count > 0;
             var filtered = signals.Where(row => MatchesColumns(row, filter)).ToList();
@@ -1018,7 +1040,10 @@ public sealed partial class MarketDb
             return new SignalDto
             {
                 Tone = shout ? "shout" : signals.Count > 0 ? "list" : "quiet",
-                Banner = SectionBanner(section, shout, signals.Count > 0),
+                Banner = section == "shout" && filtered.Count(r => r.Anomaly) > 0
+                    ? SectionBanner(section, shout, signals.Count > 0)
+                      + $" Подозрительных: {filtered.Count(r => r.Anomaly).ToString(CultureInfo.InvariantCulture)} (внизу списка)."
+                    : SectionBanner(section, shout, signals.Count > 0),
                 Snapshots = load.Snapshots,
                 Shown = filtered.Count,
                 Page = current,

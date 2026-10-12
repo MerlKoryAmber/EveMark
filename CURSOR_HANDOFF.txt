@@ -4,7 +4,7 @@ MK Jitawatch — локальный стол. Exe: JitaWatch.exe. Карта: do
 Каталог: C:\Code\jita-watch
 Живой: publish\JitaWatch.exe, http://127.0.0.1:8741, data\jita.db
 
-Сейчас: slice «слежение» в коде — WatchPollService 5 мин + ETag, fills по дельте ордеров, медиана 7д и доля захвата на закупе, UI «Слежение», OPISANIE/SKELETON обновлены. Сборка/publish — проверить. Коммит/релиз не делались. Приёмки нет.
-Хвост: ESI history 400 type 62593. Цитадели Perimeter без SSO. Дальше по плану владельца: портфель/слоты, развоз-pro, контракты…
+Сейчас: wishlist-волна в коде — портфель, haul pack (secure/ганк/курьерка/multibuy/CSV), контракты, аномалии/нетто, notes/blacklist, бэктест Крик, мини-рефайн, UI + OPISANIE. Приёмки нет.
+Хвост: ESI history 400 type 62593; полный SDE; SSO цитадели; точный бэктест; Ahbazon id уточнить.
 
-Идеи / на потом: см. предыдущий бэклог (rolling 24ч, keep_days, SSO, бэктест Крик).
+Идеи / на потом: rolling 24ч, keep_days осмыслить, графики, полный рефайн.

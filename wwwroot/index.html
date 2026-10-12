@@ -403,7 +403,9 @@
         <button class="nav-item active" type="button" data-view="board">Закуп</button>
         <button class="nav-item" type="button" data-view="signal">Сигнал</button>
         <button class="nav-item" type="button" data-view="haul">Развоз</button>
+        <button class="nav-item" type="button" data-view="portfolio">Портфель</button>
         <button class="nav-item" type="button" data-view="watch">Слежение</button>
+        <button class="nav-item" type="button" data-view="tools">Ещё</button>
         <button class="nav-item" type="button" data-view="fees">Настройки</button>
       </nav>
       <div class="sidebar-foot">Jita + Perimeter · хабы · снимок раз в час</div>
@@ -547,7 +549,22 @@
             <button id="haul-cols" class="btn btn-secondary" type="button">Столбцы</button>
             <div class="col-menu" id="haul-cols-menu" hidden></div>
           </div>
+          <button id="haul-pack-run" class="btn" type="button">Собрать рюкзак</button>
           <span class="toolbar-hint" id="haul-hint">Купить чужой sell от 500 тыс., отвезти. Мгновенно — в чужой buy (без брокерской). Либо выставить свой sell на месте назначения.</span>
+        </div>
+        <div class="card" id="haul-pack-card" style="margin:0 16px 12px">
+          <div class="fields">
+            <label class="field">Трюм м³<input id="pack-cargo" type="number" min="1" step="1" value="30000"></label>
+            <label class="field">Бюджет ISK<input id="pack-budget" type="number" min="0" step="1000000" value="500000000"></label>
+            <label class="field">Коллатерал cap<input id="pack-coll" type="number" min="0" step="1000000" value="0"></label>
+            <label class="field"><input id="pack-secure" type="checkbox" checked> Только secure (хайсек)</label>
+          </div>
+          <p class="form-msg" id="pack-msg"></p>
+          <pre id="pack-out" style="white-space:pre-wrap;font-size:12px;max-height:220px;overflow:auto;margin:8px 0 0" hidden></pre>
+          <p style="margin-top:8px">
+            <button id="pack-copy-mb" class="btn btn-secondary" type="button" hidden>Copy multibuy</button>
+            <button id="pack-copy-csv" class="btn btn-secondary" type="button" hidden>Copy CSV</button>
+          </p>
         </div>
         <div class="work">
           <div class="table-wrap">
@@ -598,6 +615,90 @@
             <button id="haul-prev" class="btn btn-secondary" type="button">←</button>
             <span id="haul-page-label">страница 1 из 1</span>
             <button id="haul-next" class="btn btn-secondary" type="button">→</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-portfolio" hidden>
+        <div class="toolbar">
+          <button id="portfolio-run" class="btn" type="button">Собрать корзину</button>
+          <span class="toolbar-hint">Капитал + слоты (Trade/Retail/…) + Margin Trading → жадная корзина buy+sell.</span>
+        </div>
+        <div class="work work-scroll">
+          <div class="card">
+            <div class="fields">
+              <label class="field">Капитал ISK<input id="pf-capital" type="number" min="0" step="1000000" value="1000000000"></label>
+              <label class="field">Trade 0–5<input id="pf-trade" type="number" min="0" max="5" value="5"></label>
+              <label class="field">Retail 0–5<input id="pf-retail" type="number" min="0" max="5" value="0"></label>
+              <label class="field">Wholesale 0–5<input id="pf-wholesale" type="number" min="0" max="5" value="0"></label>
+              <label class="field">Tycoon 0–5<input id="pf-tycoon" type="number" min="0" max="5" value="0"></label>
+              <label class="field">Margin Trading 0–5<input id="pf-margin" type="number" min="0" max="5" value="0"></label>
+            </div>
+            <p class="form-msg" id="pf-msg"></p>
+          </div>
+          <div class="table-wrap">
+            <div class="table-scroll">
+              <table class="data">
+                <thead>
+                  <tr class="cols">
+                    <th class="left">Предмет</th>
+                    <th>Шт</th>
+                    <th>Эскроу</th>
+                    <th>Оценка/сутки</th>
+                    <th>Слоты</th>
+                  </tr>
+                </thead>
+                <tbody id="pf-body"></tbody>
+              </table>
+              <div class="empty" id="pf-empty" hidden>Нет кандидатов — нужен свежий снимок.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-tools" hidden>
+        <div class="toolbar">
+          <span class="toolbar-hint">Контракты, заметки/blacklist, бэктест Крик, мини-рефайн.</span>
+        </div>
+        <div class="work work-scroll">
+          <div class="card">
+            <h3>Публичные контракты (The Forge)</h3>
+            <p><button id="contracts-run" class="btn" type="button">Сканировать</button></p>
+            <p class="form-msg" id="contracts-msg"></p>
+            <div class="table-wrap" style="margin-top:8px">
+              <table class="data"><thead><tr class="cols"><th class="left">Контракт</th><th class="left">Предмет</th><th>Цена</th><th>Рынок</th><th>Выгода</th></tr></thead>
+              <tbody id="contracts-body"></tbody></table>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Заметки / blacklist</h3>
+            <div class="fields">
+              <label class="field">typeId<input id="note-type" type="number" min="1"></label>
+              <label class="field">Заметка<input id="note-text" type="text" maxlength="200"></label>
+              <label class="field"><input id="note-bl" type="checkbox"> В blacklist</label>
+            </div>
+            <p style="margin-top:8px"><button id="note-save" class="btn" type="button">Сохранить</button></p>
+            <p class="form-msg" id="note-msg"></p>
+            <ul id="note-list" style="margin-top:8px;padding-left:18px;font-size:13px"></ul>
+          </div>
+          <div class="card">
+            <h3>Бэктест «Крик» (грубый)</h3>
+            <div class="fields">
+              <label class="field">Дней<input id="bt-days" type="number" min="1" max="120" value="30"></label>
+            </div>
+            <p style="margin-top:8px"><button id="bt-run" class="btn" type="button">Считать</button></p>
+            <pre id="bt-out" style="white-space:pre-wrap;font-size:12px;margin-top:8px"></pre>
+          </div>
+          <div class="card">
+            <h3>Рефайн (мини, без SDE)</h3>
+            <p style="font-size:13px;opacity:.85">Известные руды: 18 Veldspar, 19 Scordite, 20 Pyroxeres, 21 Plagioclase, 22 Omber…</p>
+            <div class="fields">
+              <label class="field">ore typeId<input id="rf-ore" type="number" min="1" value="18"></label>
+              <label class="field">Штук<input id="rf-units" type="number" min="100" step="100" value="10000"></label>
+              <label class="field">Эффективность 0–1<input id="rf-eff" type="number" min="0.01" max="1" step="0.01" value="0.52"></label>
+            </div>
+            <p style="margin-top:8px"><button id="rf-run" class="btn" type="button">Считать</button></p>
+            <pre id="rf-out" style="white-space:pre-wrap;font-size:12px;margin-top:8px"></pre>
           </div>
         </div>
       </section>
@@ -702,7 +803,8 @@
     const isk = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
     const iskWhole = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
     const pct = new Intl.NumberFormat("ru-RU", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const titles = { board: "Закуп", signal: "Сигнал", haul: "Развоз", watch: "Слежение", fees: "Настройки" };
+    const titles = { board: "Закуп", signal: "Сигнал", haul: "Развоз", portfolio: "Портфель", watch: "Слежение", tools: "Ещё", fees: "Настройки" };
+    let lastPack = null;
     const watchHubs = {
       jita: { locationId: 60003760, regionId: 10000002 },
       amarr: { locationId: 60008494, regionId: 10000043 },
@@ -818,7 +920,8 @@
           ["dailyVolume", "Объём/сутки", "num", "compact"],
           ["dailyIsk", "Оценка/сутки", "isk", "money"],
           ["hours", "Часов", "num", "compact"],
-          ["thin", "Тонко", "text"]
+          ["thin", "Тонко", "text"],
+          ["anomaly", "Аном.", "flag"]
         ]
       },
       off: {
@@ -837,12 +940,13 @@
       },
       churn: {
         sort: "buyMoves", dir: -1,
-        hint: "Последние часы лучшая покупка или продажа менялась каждый снимок.",
+        hint: "Последние часы лучшая покупка или продажа менялась каждый снимок. «Нетто» — маржа минус типичные перестановки.",
         cols: [
           ["name", "Предмет", "text"],
           ["bestBuy", "Покупка", "isk", "money"],
           ["bestSell", "Продажа", "isk", "money"],
           ["marginIsk", "Маржа", "isk", "money"],
+          ["netMarginIsk", "Нетто", "isk", "money"],
           ["buyMoves", "Сдвигов покупки", "num", "compact"],
           ["sellMoves", "Сдвигов продажи", "num", "compact"]
         ]
@@ -1027,6 +1131,7 @@
       if (name === "signal") loadSignals().catch(() => {});
       if (name === "haul") loadHaul().catch(() => {});
       if (name === "watch") loadWatch().catch(() => {});
+      if (name === "tools") loadNotes().catch(() => {});
     }
 
     async function loadWatch() {
@@ -1162,10 +1267,13 @@
       const cols = signalViews[signalKind].cols;
       for (const r of rows) {
         const tr = document.createElement("tr");
+        if (r.anomaly) tr.style.opacity = "0.55";
         tr.innerHTML = cols.map(col => {
           const [key, , kind] = col;
           if (key === "name")
             return `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>`;
+          if (kind === "flag")
+            return `<td>${r[key] ? "⚠" : ""}</td>`;
           if (kind === "text")
             return `<td class="left">${escapeHtml(r[key] || "—")}</td>`;
           return `<td>${cell(r[key], kind)}</td>`;
@@ -1516,6 +1624,136 @@
       msg.textContent = "Опрос завершён";
       msg.className = "form-msg";
     });
+
+    async function loadNotes() {
+      const rows = await fetch("/api/notes").then(r => r.json());
+      const ul = document.getElementById("note-list");
+      ul.innerHTML = "";
+      for (const n of rows) {
+        const li = document.createElement("li");
+        li.textContent = `${n.blacklisted ? "[BL] " : ""}${n.name} (#${n.typeId}) — ${n.note || ""}`;
+        ul.appendChild(li);
+      }
+    }
+
+    document.getElementById("portfolio-run").addEventListener("click", async () => {
+      const msg = document.getElementById("pf-msg");
+      msg.textContent = "Считаем…";
+      const body = {
+        capital: Number(document.getElementById("pf-capital").value) || 0,
+        trade: Number(document.getElementById("pf-trade").value) || 0,
+        retail: Number(document.getElementById("pf-retail").value) || 0,
+        wholesale: Number(document.getElementById("pf-wholesale").value) || 0,
+        tycoon: Number(document.getElementById("pf-tycoon").value) || 0,
+        marginTrading: Number(document.getElementById("pf-margin").value) || 0
+      };
+      const dto = await fetch("/api/portfolio", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+      }).then(r => r.json());
+      msg.textContent = `Слоты ${dto.slotsUsed}/${dto.slots} · эскроу ${iskWhole.format(dto.escrowUsed)} · оценка/сутки ~${iskWhole.format(dto.dailyIskTotal)}`;
+      const tbody = document.getElementById("pf-body");
+      tbody.innerHTML = "";
+      document.getElementById("pf-empty").hidden = (dto.picks || []).length > 0;
+      for (const p of dto.picks || []) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td class="left"><a href="https://evetycoon.com/market/${p.typeId}" target="_blank" rel="noopener">${escapeHtml(p.name)}</a></td>` +
+          `<td>${isk.format(p.units)}</td><td>${iskWhole.format(p.escrow)}</td>` +
+          `<td>${iskWhole.format(p.dailyIsk)}</td><td>${p.slotsUsed}</td>`;
+        tbody.appendChild(tr);
+      }
+    });
+
+    document.getElementById("haul-pack-run").addEventListener("click", async () => {
+      const msg = document.getElementById("pack-msg");
+      msg.textContent = "Собираем…";
+      const body = {
+        cargoM3: Number(document.getElementById("pack-cargo").value) || 0,
+        budget: Number(document.getElementById("pack-budget").value) || 0,
+        collateralBudget: Number(document.getElementById("pack-coll").value) || 0,
+        highSecOnly: document.getElementById("pack-secure").checked
+      };
+      lastPack = await fetch("/api/haul/pack", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+      }).then(r => r.json());
+      const lines = (lastPack.items || []).map(i =>
+        `${i.name}: ${i.units} шт · ${i.fromName}→${i.toName} · маржа ${iskWhole.format(i.marginIsk)} · RF ${iskWhole.format(i.redFrogIsk)} · ганк: ${(i.gankSystems || []).join(", ") || "—"}`);
+      const out = document.getElementById("pack-out");
+      out.hidden = false;
+      out.textContent = `м³ ${isk.format(lastPack.cargoUsed)} · бюджет ${iskWhole.format(lastPack.budgetUsed)} · маржа пачки ${iskWhole.format(lastPack.dailyMargin)}\n` + lines.join("\n");
+      msg.textContent = (lastPack.items || []).length ? "Готово" : "Пусто — нет связок под лимиты";
+      document.getElementById("pack-copy-mb").hidden = !lastPack.multibuy;
+      document.getElementById("pack-copy-csv").hidden = !lastPack.csv;
+    });
+    document.getElementById("pack-copy-mb").addEventListener("click", () => {
+      if (lastPack?.multibuy) navigator.clipboard.writeText(lastPack.multibuy);
+    });
+    document.getElementById("pack-copy-csv").addEventListener("click", () => {
+      if (lastPack?.csv) navigator.clipboard.writeText(lastPack.csv);
+    });
+
+    document.getElementById("contracts-run").addEventListener("click", async () => {
+      const msg = document.getElementById("contracts-msg");
+      msg.textContent = "ESI… (может занять минуту)";
+      const rows = await fetch("/api/contracts").then(r => r.json());
+      const body = document.getElementById("contracts-body");
+      body.innerHTML = "";
+      msg.textContent = `Найдено: ${rows.length}`;
+      for (const d of rows) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td class="left">#${d.contractId} ${escapeHtml(d.title || "")}</td>` +
+          `<td class="left">${escapeHtml(d.itemName)} × ${d.quantity}</td>` +
+          `<td>${iskWhole.format(d.price)}</td><td>${iskWhole.format(d.marketSell)}</td>` +
+          `<td>${iskWhole.format(d.edgeIsk)} (${pct.format(d.edgeFrac)})</td>`;
+        body.appendChild(tr);
+      }
+    });
+
+    document.getElementById("note-save").addEventListener("click", async () => {
+      const typeId = Number(document.getElementById("note-type").value);
+      const msg = document.getElementById("note-msg");
+      if (!typeId) { msg.textContent = "typeId"; msg.className = "form-msg err"; return; }
+      await fetch("/api/notes", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          typeId,
+          note: document.getElementById("note-text").value,
+          blacklisted: document.getElementById("note-bl").checked
+        })
+      });
+      msg.textContent = "Сохранено";
+      msg.className = "form-msg";
+      await loadNotes();
+    });
+
+    document.getElementById("bt-run").addEventListener("click", async () => {
+      const days = Number(document.getElementById("bt-days").value) || 30;
+      const dto = await fetch("/api/backtest/shout?days=" + days).then(r => r.json());
+      document.getElementById("bt-out").textContent =
+        `Дней ${dto.days}: попаданий фильтра ${dto.hits}, сумма оценок ~${iskWhole.format(dto.sumDailyIsk)}\n` +
+        (dto.notes || []).join("\n");
+    });
+
+    document.getElementById("rf-run").addEventListener("click", async () => {
+      const body = {
+        oreTypeId: Number(document.getElementById("rf-ore").value),
+        units: Number(document.getElementById("rf-units").value),
+        efficiency: Number(document.getElementById("rf-eff").value)
+      };
+      const resp = await fetch("/api/refine", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+      });
+      const dto = await resp.json();
+      if (!resp.ok) {
+        document.getElementById("rf-out").textContent = dto.error || "ошибка";
+        return;
+      }
+      document.getElementById("rf-out").textContent =
+        `Руда рынок ${iskWhole.format(dto.oreMarketValue)} → выход ${iskWhole.format(dto.outputValue)} · край ${iskWhole.format(dto.edgeIsk)}\n` +
+        (dto.lines || []).map(l => `${l.name}: ${l.qty} × ${iskWhole.format(l.sell)} = ${iskWhole.format(l.value)}`).join("\n");
+    });
+
     if (location.hash === "#signal") showView("signal");
     if (location.hash === "#watch") showView("watch");
     tick();

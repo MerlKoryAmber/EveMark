@@ -103,6 +103,120 @@ internal static class Program
             await poll.PollOnceAsync(ct);
             return Results.Accepted();
         });
+        app.MapPost("/api/portfolio", async (PortfolioRequest body, MarketDb db, CancellationToken ct) =>
+        {
+            if (body.Capital < 0)
+                return Results.BadRequest(new { error = "Капитал ≥ 0" });
+            var rows = await db.LoadBoardRowsAsync(BoardSources.Both, ct);
+            var fees = await db.GetSettingsAsync(ct);
+            return Results.Ok(PortfolioBuilder.Build(body with { MaxItems = body.MaxItems <= 0 ? 40 : body.MaxItems }, rows, fees.BrokerFee));
+        });
+        app.MapPost("/api/haul/pack", async (HaulPackRequest body, MarketDb db, EsiClient esi, CancellationToken ct) =>
+        {
+            var empty = new HaulFilter(null, default, default, default, default, default, default, null, null);
+            var haul = await db.GetHaulAsync(1, "marginIsk", "desc", empty, ct);
+            var all = haul.Rows.ToList();
+            for (var p = 2; p <= Math.Min(haul.Pages, 5); p++)
+                all.AddRange((await db.GetHaulAsync(p, "marginIsk", "desc", empty, ct)).Rows);
+
+            if (body.HighSecOnly)
+            {
+                var kept = new List<HaulRow>();
+                foreach (var row in all.Take(80))
+                {
+                    var from = SystemForLocation(row.FromLocationId, row.FromName);
+                    var to = SystemForLocation(row.ToLocationId, row.ToName);
+                    if (from is null || to is null)
+                    {
+                        if (row.Jumps <= 25)
+                            kept.Add(row);
+                        continue;
+                    }
+
+                    var route = await esi.FetchRouteSystemsAsync(from.Value, to.Value, secure: true, ct);
+                    if (route is null)
+                        continue;
+                    kept.Add(row with { Jumps = Math.Max(0, route.Count - 1) });
+                }
+
+                all = kept;
+            }
+
+            var pack = HaulPacker.Pack(all, body);
+            if (pack.Items.Count == 0)
+                return Results.Ok(pack);
+
+            var enriched = new List<HaulPackItem>();
+            foreach (var item in pack.Items)
+            {
+                var src = all.FirstOrDefault(r => r.TypeId == item.TypeId && r.FromName == item.FromName && r.ToName == item.ToName);
+                var from = src is null ? null : SystemForLocation(src.FromLocationId, src.FromName);
+                var to = src is null ? null : SystemForLocation(src.ToLocationId, src.ToName);
+                IReadOnlyList<string> gank = [];
+                if (from is not null && to is not null)
+                {
+                    var route = await esi.FetchRouteSystemsAsync(from.Value, to.Value, secure: body.HighSecOnly, ct);
+                    if (route is not null)
+                        gank = GankSystems.OnRoute(route);
+                }
+
+                enriched.Add(item with { GankSystems = gank });
+            }
+
+            var multibuy = string.Join("\n", enriched.Select(p => $"{p.Name} {p.Units.ToString(CultureInfo.InvariantCulture)}"));
+            return Results.Ok(pack with { Items = enriched, Multibuy = multibuy });
+        });
+        app.MapPost("/api/refine", async (RefineRequest body, MarketDb db, CancellationToken ct) =>
+        {
+            if (body.OreTypeId <= 0 || body.Units < 1)
+                return Results.BadRequest(new { error = "oreTypeId и units" });
+            var board = await db.LoadBoardRowsAsync(BoardSources.Both, ct);
+            var prices = board.ToDictionary(r => r.TypeId, r => r.BestSell);
+            var dto = RefineTable.Evaluate(body.OreTypeId, body.Units, body.Efficiency <= 0 ? 0.52m : body.Efficiency, prices);
+            if (dto is null)
+                return Results.BadRequest(new { error = "Руда не в мини-таблице", known = RefineTable.KnownOreIds });
+            return Results.Ok(dto);
+        });
+        app.MapGet("/api/refine/ores", () => RefineTable.KnownOreIds);
+        app.MapGet("/api/contracts", async (EsiClient esi, MarketDb db, int? regionId, CancellationToken ct) =>
+        {
+            var region = regionId is > 0 ? regionId.Value : TradeHubs.ForgeRegionId;
+            var contracts = await esi.FetchPublicContractsAsync(region, ct);
+            var board = await db.LoadBoardRowsAsync(BoardSources.Both, ct);
+            var sell = board.ToDictionary(r => r.TypeId, r => r.BestSell);
+            var deals = new List<ContractDeal>();
+            foreach (var c in contracts.Where(x => x.Type == "item_exchange").Take(30))
+            {
+                var items = await esi.FetchContractItemsAsync(c.ContractId, ct);
+                var included = items.Where(i => i.IsIncluded && i.Quantity > 0).ToList();
+                if (included.Count is < 1 or > 3)
+                    continue;
+                foreach (var it in included)
+                {
+                    if (!sell.TryGetValue(it.TypeId, out var marketSell) || marketSell <= 0)
+                        continue;
+                    var value = marketSell * it.Quantity;
+                    var edge = value - c.Price;
+                    if (edge <= 0)
+                        continue;
+                    var name = board.FirstOrDefault(b => b.TypeId == it.TypeId)?.Name ?? "#" + it.TypeId;
+                    deals.Add(new ContractDeal(
+                        c.ContractId, c.Title ?? "", c.Price, it.TypeId, name, it.Quantity, marketSell, edge, c.Price > 0 ? edge / c.Price : 0));
+                }
+            }
+
+            return Results.Ok(deals.OrderByDescending(d => d.EdgeIsk).Take(50).ToList());
+        });
+        app.MapGet("/api/notes", (MarketDb db, CancellationToken ct) => db.ListNotesAsync(ct));
+        app.MapPost("/api/notes", async (NoteRequest body, MarketDb db, CancellationToken ct) =>
+        {
+            if (body.TypeId <= 0)
+                return Results.BadRequest(new { error = "typeId" });
+            await db.SetTypeNoteAsync(body.TypeId, body.Note, body.Blacklisted, ct);
+            return Results.Ok(await db.ListNotesAsync(ct));
+        });
+        app.MapGet("/api/backtest/shout", (MarketDb db, int? days, CancellationToken ct) =>
+            db.BacktestShoutAsync(days ?? 30, ct));
         app.MapGet("/api/signals", (
             MarketDb db,
             int? page,
@@ -280,6 +394,17 @@ internal static class Program
     }
 
     private sealed record WatchAddRequest(int TypeId, long LocationId, int RegionId, string? Note);
+    private sealed record NoteRequest(int TypeId, string? Note, bool? Blacklisted);
+
+    private static int? SystemForLocation(long locationId, string? name)
+    {
+        var hub = TradeHubs.NpcByLocation(locationId);
+        if (hub is not null)
+            return hub.SystemId;
+        if (TradeHubs.IsPerimeterName(name))
+            return TradeHubs.PerimeterSystemId;
+        return null;
+    }
 
     private static bool AgreeToCreateDatabase(string dbPath)
     {
