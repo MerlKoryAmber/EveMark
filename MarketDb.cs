@@ -1028,10 +1028,10 @@ public sealed class MarketDb
             }
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             var dayVolume = new Dictionary<(int TypeId, int RegionId), long>();
             await using (var histCmd = conn.CreateCommand())
             {
+                // последний полный день ESI (< сегодня UTC); «вчера» часто ещё не опубликовано
                 histCmd.CommandText = """
                     SELECT h.type_id, h.region_id, h.day, h.volume
                     FROM daily_history h
@@ -1045,10 +1045,7 @@ public sealed class MarketDb
                 histCmd.Parameters.AddWithValue("$today", today);
                 await using var histReader = await histCmd.ExecuteReaderAsync(ct);
                 while (await histReader.ReadAsync(ct))
-                {
-                    if (histReader.GetString(2) == yesterday)
-                        dayVolume[(ReadInt(histReader, 0), ReadInt(histReader, 1))] = ReadLong(histReader, 3);
-                }
+                    dayVolume[(ReadInt(histReader, 0), ReadInt(histReader, 1))] = ReadLong(histReader, 3);
             }
 
             var rejected = new HashSet<int>();
@@ -1294,7 +1291,6 @@ public sealed class MarketDb
             : [];
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var history = new Dictionary<int, Hist>();
         await using (var cmd = conn.CreateCommand())
         {
@@ -1325,9 +1321,9 @@ public sealed class MarketDb
             if (margin <= 0)
                 continue;
             history.TryGetValue(quote.TypeId, out var hist);
-            var tradedYesterday = hist is not null && hist.Day == yesterday;
+            var hasVolumeDay = hist is not null;
             var pile = Math.Min(quote.BuyVolume, quote.SellVolume);
-            var depth = tradedYesterday
+            var depth = hasVolumeDay
                 ? Math.Min(hist!.Volume, pile)
                 : (long?)null;
             var capital = pile > 0 ? buy * pile : (decimal?)null;
@@ -1339,9 +1335,9 @@ public sealed class MarketDb
                 BestSell = quote.BestSell,
                 MarginIsk = margin,
                 MarginFrac = fraction,
-                DailyVolume = tradedYesterday ? hist!.Volume : null,
-                VolumeDay = tradedYesterday ? hist!.Day : null,
-                Average = tradedYesterday ? hist!.Average : null,
+                DailyVolume = hasVolumeDay ? hist!.Volume : null,
+                VolumeDay = hasVolumeDay ? hist!.Day : null,
+                Average = hasVolumeDay ? hist!.Average : null,
                 DailyIsk = depth is null ? null : margin * depth.Value,
                 Hours = 0,
                 BuyVolume = quote.BuyVolume,
@@ -1352,7 +1348,7 @@ public sealed class MarketDb
                 SellTouch = quote.SellTouch > 0 ? quote.SellTouch : null,
                 Relists = FeeMath.Relists(margin, quote.BestSell, fees.BrokerFee),
                 Capital = capital,
-                Days = tradedYesterday && hist!.Volume > 0 && pile > 0 ? pile / (decimal)hist.Volume : null,
+                Days = hasVolumeDay && hist!.Volume > 0 && pile > 0 ? pile / (decimal)hist.Volume : null,
                 DailyRoi = capital is > 0 && depth is not null ? margin * depth.Value / capital.Value : null
             });
         }

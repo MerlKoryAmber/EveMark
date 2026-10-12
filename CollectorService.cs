@@ -15,6 +15,7 @@ public sealed class CollectorService : BackgroundService
     private int _syncing;
     private int _ordersRunning;
     private DateTime? _announcedDue;
+    private string? _syncUtcDay;
 
     public CollectorService(MarketDb db, EsiClient esi, IOptions<MarketOptions> options, ILogger<CollectorService> log)
     {
@@ -84,6 +85,14 @@ public sealed class CollectorService : BackgroundService
                 {
                     await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
                     continue;
+                }
+
+                var utcDay = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                if (!string.Equals(_syncUtcDay, utcDay, StringComparison.Ordinal))
+                {
+                    _syncUtcDay = utcDay;
+                    _log.LogInformation("Новый UTC-день {Day}, обновляем историю", utcDay);
+                    EnsureSync();
                 }
 
                 var due = last.Value.Add(interval);
