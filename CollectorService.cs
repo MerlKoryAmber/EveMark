@@ -128,6 +128,9 @@ public sealed class CollectorService : BackgroundService
         try
         {
             await _db.SetStatusAsync("orders", "запуск съёма…", null, ct);
+            var settings = await _db.GetSettingsAsync(ct);
+            var minBoard = settings.MinSellPrice > 0 ? settings.MinSellPrice : _options.MinSellPrice;
+            var minHaul = settings.MinHaulSellPrice > 0 ? settings.MinHaulSellPrice : _options.MinHaulSellPrice;
             var rejected = await _db.RejectedIdsAsync(ct);
             var board = new Dictionary<int, BoardMerge>();
             var locationRows = new List<LocationQuoteInsert>();
@@ -208,7 +211,7 @@ public sealed class CollectorService : BackgroundService
                     {
                         if (!book.HasSell || rejected.Contains(typeId))
                             continue;
-                        if (book.BestSell >= _options.MinHaulSellPrice)
+                        if (book.BestSell >= minHaul)
                         {
                             locationRows.Add(new LocationQuoteInsert(
                                 typeId,
@@ -221,10 +224,12 @@ public sealed class CollectorService : BackgroundService
                                 book.BuyOrders,
                                 book.SellOrders,
                                 book.BuyTouch,
-                                book.SellTouch));
+                                book.SellTouch,
+                                book.BestBuyIssued,
+                                book.BestSellIssued));
                         }
 
-                        if (!boardSpot || book.BestSell < _options.MinSellPrice)
+                        if (!boardSpot || book.BestSell < minBoard)
                             continue;
                         if (!board.TryGetValue(typeId, out var merged))
                         {
@@ -325,9 +330,8 @@ public sealed class CollectorService : BackgroundService
     private async Task SyncLoopAsync(CancellationToken ct)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var cosmetics = await _db.RejectNamedAsync(IsCosmetic, "cosmetic", today, ct);
-        if (cosmetics > 0)
-            _log.LogInformation("Украшения убраны из загрузки: {Count}", cosmetics);
+        var settings = await _db.GetSettingsAsync(ct);
+        await ApplyNameFiltersAsync(settings, ct);
         var needNames = await _db.TypesNeedingNamesAsync(ct);
         if (needNames.Count > 0)
             await FetchNamesAsync(needNames, ct);
@@ -376,26 +380,74 @@ public sealed class CollectorService : BackgroundService
         }
     }
 
+    public Task ApplyNameFiltersAsync(FeeSettings settings, CancellationToken ct = default) =>
+        ApplyNameFiltersCoreAsync(settings, ct);
+
+    private async Task ApplyNameFiltersCoreAsync(FeeSettings settings, CancellationToken ct)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        await _db.ClearRejectReasonsAsync(["cosmetic", "special_edition", "blueprint"], ct);
+        if (settings.FilterCosmetics)
+        {
+            var n = await _db.RejectNamedAsync(IsCosmetic, "cosmetic", today, ct);
+            if (n > 0)
+                _log.LogInformation("Украшения убраны: {Count}", n);
+        }
+
+        if (settings.FilterSpecialEdition)
+        {
+            var n = await _db.RejectNamedAsync(IsSpecialEdition, "special_edition", today, ct);
+            if (n > 0)
+                _log.LogInformation("Special Edition Assets убраны: {Count}", n);
+        }
+
+        if (settings.FilterBlueprints)
+        {
+            var n = await _db.RejectNamedAsync(IsBlueprint, "blueprint", today, ct);
+            if (n > 0)
+                _log.LogInformation("Блюпринты убраны: {Count}", n);
+        }
+    }
+
     private async Task FetchNamesAsync(IReadOnlyList<int> typeIds, CancellationToken ct)
     {
         await _db.SetStatusAsync("sync", $"имена, {typeIds.Count.ToString(CultureInfo.InvariantCulture)} шт.", null, ct);
+        var settings = await _db.GetSettingsAsync(ct);
         var map = await _esi.FetchNamesAsync(typeIds, ct);
         var keep = new List<(int TypeId, string Name)>();
-        var skins = new List<int>();
+        var rejectCosmetic = new List<int>();
+        var rejectSe = new List<int>();
+        var rejectBp = new List<int>();
         foreach (var typeId in typeIds)
         {
             if (!map.TryGetValue(typeId, out var name) || string.IsNullOrWhiteSpace(name))
                 continue;
-            if (IsCosmetic(name))
-                skins.Add(typeId);
+            if (settings.FilterCosmetics && IsCosmetic(name))
+                rejectCosmetic.Add(typeId);
+            else if (settings.FilterSpecialEdition && IsSpecialEdition(name))
+                rejectSe.Add(typeId);
+            else if (settings.FilterBlueprints && IsBlueprint(name))
+                rejectBp.Add(typeId);
             else
                 keep.Add((typeId, name));
         }
 
         await _db.UpsertNamesAsync(keep, ct);
+        // имена отсечённых тоже нужны, чтобы RejectNamed / повторный отсев работали
+        var dropped = typeIds
+            .Where(id => map.ContainsKey(id))
+            .Except(keep.Select(k => k.TypeId))
+            .Select(id => (id, map[id]))
+            .ToList();
+        if (dropped.Count > 0)
+            await _db.UpsertNamesAsync(dropped, ct);
         var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        await _db.RejectAsync(skins, "cosmetic", today, ct);
-        _log.LogInformation("Имена записаны: {Keep}, украшений убрано: {Skins}", keep.Count, skins.Count);
+        await _db.RejectAsync(rejectCosmetic, "cosmetic", today, ct);
+        await _db.RejectAsync(rejectSe, "special_edition", today, ct);
+        await _db.RejectAsync(rejectBp, "blueprint", today, ct);
+        _log.LogInformation(
+            "Имена записаны: {Keep}, отсев cosmetic/SE/bp: {C}/{S}/{B}",
+            keep.Count, rejectCosmetic.Count, rejectSe.Count, rejectBp.Count);
     }
 
     private async Task FetchHistoryAsync(IReadOnlyList<HistoryNeed> jobs, string today, CancellationToken ct)
@@ -478,6 +530,36 @@ public sealed class CollectorService : BackgroundService
             return true;
         return CosmeticWords.Any(word => HasWord(name, word));
     }
+
+    /// <summary>
+    /// Категория ESI 63 (Special Edition Assets). В имени категории почти никогда нет —
+    /// отсекаем по типичным префиксам/меткам (NEO YC, YC1xx.дата, Tournament Card…).
+    /// </summary>
+    internal static bool IsSpecialEdition(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+        if (name.Contains("Special Edition", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (name.Contains("Tournament Card", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (name.StartsWith("NEO YC", StringComparison.OrdinalIgnoreCase))
+            return true;
+        // YC114.01.19 - … (сувениры/журналы SEA)
+        if (name.StartsWith("YC1", StringComparison.OrdinalIgnoreCase))
+        {
+            var i = 2;
+            while (i < name.Length && char.IsDigit(name[i]))
+                i++;
+            if (i > 4 && i < name.Length && name[i] == '.')
+                return true;
+        }
+
+        return false;
+    }
+
+    internal static bool IsBlueprint(string name) =>
+        name.Contains("Blueprint", StringComparison.OrdinalIgnoreCase);
 
     private static bool HasWord(string name, string word)
     {

@@ -77,6 +77,8 @@ public static class SignalRule
 {
     public const int MinSnapshots = 6;
     public const int MinHours = 6;
+    /// <summary>Макс. простой между снимками живой вилки (рестарт софта), дальше серия «Часов» рвётся.</summary>
+    public static readonly TimeSpan MaxHoursGap = TimeSpan.FromHours(3);
     public const decimal MinMarginFrac = 0.03m;
     public const decimal MaxMarginFrac = 1m;
     public const long MinDailyVolume = 10;
@@ -212,7 +214,6 @@ public sealed record ColumnFilter(
 public sealed partial class MarketDb
 {
     private const decimal MaxBoardMarginPercent = 5000m;
-    private const decimal MinHaulAsk = 500_000m;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path;
 
@@ -369,6 +370,8 @@ public sealed partial class MarketDb
                 """, ("$now", Stamp(DateTime.UtcNow)));
             await EnsureColumnAsync(conn, "quote", "buy_touch", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnAsync(conn, "quote", "sell_touch", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnAsync(conn, "location_quote", "best_buy_issued", "TEXT", ct);
+            await EnsureColumnAsync(conn, "location_quote", "best_sell_issued", "TEXT", ct);
             await EnsureColumnAsync(conn, "type_name", "volume", "TEXT", ct);
             await MigrateHistoryRegionAsync(conn, ct);
             await ExecAsync(conn, """
@@ -446,12 +449,27 @@ public sealed partial class MarketDb
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             INSERT INTO setting (key, value) VALUES ('keep_days', $k)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            INSERT INTO setting (key, value) VALUES ('filter_cosmetics', $fc)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            INSERT INTO setting (key, value) VALUES ('filter_special_edition', $fs)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            INSERT INTO setting (key, value) VALUES ('filter_blueprints', $fb)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            INSERT INTO setting (key, value) VALUES ('min_sell_price', $msp)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            INSERT INTO setting (key, value) VALUES ('min_haul_sell_price', $mhp)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             """,
             ("$a", settings.Accounting.ToString(CultureInfo.InvariantCulture)),
             ("$b", settings.BrokerRelations.ToString(CultureInfo.InvariantCulture)),
             ("$f", settings.FactionStanding.ToString(CultureInfo.InvariantCulture)),
             ("$c", settings.CorpStanding.ToString(CultureInfo.InvariantCulture)),
-            ("$k", settings.KeepDays.ToString(CultureInfo.InvariantCulture))), ct);
+            ("$k", settings.KeepDays.ToString(CultureInfo.InvariantCulture)),
+            ("$fc", settings.FilterCosmetics ? "1" : "0"),
+            ("$fs", settings.FilterSpecialEdition ? "1" : "0"),
+            ("$fb", settings.FilterBlueprints ? "1" : "0"),
+            ("$msp", settings.MinSellPrice.ToString(CultureInfo.InvariantCulture)),
+            ("$mhp", settings.MinHaulSellPrice.ToString(CultureInfo.InvariantCulture))), ct);
 
     public Task<DateTime?> GetLastSnapshotUtcAsync(CancellationToken ct = default) =>
         WithAsync(async conn =>
@@ -606,8 +624,9 @@ public sealed partial class MarketDb
             loc.CommandText = """
                 INSERT INTO location_quote (
                     snapshot_id, type_id, location_id, region_id, best_buy, best_sell,
-                    buy_volume, sell_volume, buy_orders, sell_orders, buy_touch, sell_touch)
-                VALUES ($sid, $type, $loc, $reg, $bb, $bs, $bv, $sv, $bo, $so, $bt, $st)
+                    buy_volume, sell_volume, buy_orders, sell_orders, buy_touch, sell_touch,
+                    best_buy_issued, best_sell_issued)
+                VALUES ($sid, $type, $loc, $reg, $bb, $bs, $bv, $sv, $bo, $so, $bt, $st, $bbi, $bsi)
                 """;
             var lSid = loc.Parameters.Add("$sid", SqliteType.Integer);
             var lType = loc.Parameters.Add("$type", SqliteType.Integer);
@@ -621,6 +640,8 @@ public sealed partial class MarketDb
             var lSo = loc.Parameters.Add("$so", SqliteType.Integer);
             var lBt = loc.Parameters.Add("$bt", SqliteType.Integer);
             var lSt = loc.Parameters.Add("$st", SqliteType.Integer);
+            var lBbi = loc.Parameters.Add("$bbi", SqliteType.Text);
+            var lBsi = loc.Parameters.Add("$bsi", SqliteType.Text);
             lSid.Value = id;
             foreach (var row in locationRows)
             {
@@ -635,6 +656,8 @@ public sealed partial class MarketDb
                 lSo.Value = row.SellOrders;
                 lBt.Value = row.BuyTouch;
                 lSt.Value = row.SellTouch;
+                lBbi.Value = row.BestBuyIssued is null ? DBNull.Value : Stamp(row.BestBuyIssued.Value);
+                lBsi.Value = row.BestSellIssued is null ? DBNull.Value : Stamp(row.BestSellIssued.Value);
                 await loc.ExecuteNonQueryAsync(ct);
             }
 
@@ -787,6 +810,15 @@ public sealed partial class MarketDb
 
     public Task UnrejectAsync(int typeId, CancellationToken ct = default) =>
         WithAsync(conn => ExecAsync(conn, "DELETE FROM reject WHERE type_id = $id AND reason = 'no_trade'", ("$id", typeId)), ct);
+
+    public Task ClearRejectReasonsAsync(IReadOnlyList<string> reasons, CancellationToken ct = default) =>
+        WithAsync(async conn =>
+        {
+            foreach (var reason in reasons)
+            {
+                await ExecAsync(conn, "DELETE FROM reject WHERE reason = $r", ("$r", reason));
+            }
+        }, ct);
 
     public Task<IReadOnlyList<int>> RejectsToRecheckAsync(string todayUtc, CancellationToken ct = default) =>
         WithAsync(async conn =>
@@ -1176,12 +1208,13 @@ public sealed partial class MarketDb
             }
 
             var rows = new List<HaulRow>();
+            var minHaul = fees.MinHaulSellPrice > 0 ? fees.MinHaulSellPrice : 500_000m;
             foreach (var (typeId, spots) in byType)
             {
                 for (var i = 0; i < spots.Count; i++)
                 {
                     var from = spots[i];
-                    if (from.SellVolume < 1 || from.BestSell < MinHaulAsk)
+                    if (from.SellVolume < 1 || from.BestSell < minHaul)
                         continue;
                     for (var j = 0; j < spots.Count; j++)
                     {
@@ -1861,24 +1894,32 @@ public sealed partial class MarketDb
             .Replace(" ", "", StringComparison.Ordinal)
             .Replace("\u00a0", "", StringComparison.Ordinal);
 
+    /// <summary>
+    /// Часы жизни вилки по стенам часов: от самого свежего до самого старого снимка
+    /// непрерывной серии (разрыв &gt; <see cref="SignalRule.MaxHoursGap"/> или мёртвая вилка рвут). Не число волн.
+    /// </summary>
     private static int Streak(List<Point>? points, FeeSettings fees)
     {
         if (points is null || points.Count == 0)
             return 0;
+        DateTime? newest = null;
+        DateTime? oldest = null;
         DateTime? prev = null;
-        var hours = 0;
         foreach (var point in points)
         {
-            if (prev is not null && prev.Value - point.Time > TimeSpan.FromMinutes(90))
+            if (prev is not null && prev.Value - point.Time > SignalRule.MaxHoursGap)
                 break;
             var (margin, _) = FeeMath.Margin(point.Buy, point.Sell, fees.SalesTax, fees.BrokerFee);
             if (margin <= 0 || point.BuyVolume < SignalRule.MinTouch || point.SellVolume < SignalRule.MinTouch)
                 break;
-            hours++;
+            newest ??= point.Time;
+            oldest = point.Time;
             prev = point.Time;
         }
 
-        return hours;
+        if (newest is null || oldest is null)
+            return 0;
+        return (int)Math.Floor((newest.Value - oldest.Value).TotalHours);
     }
 
     private static async Task<FeeSettings> ReadSettingsAsync(SqliteConnection conn)
@@ -1889,12 +1930,26 @@ public sealed partial class MarketDb
         await using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
             map[reader.GetString(0)] = reader.GetString(1);
+        var minSell = ParseDec(map, "min_sell_price", 1_000_000m);
+        var minHaul = ParseDec(map, "min_haul_sell_price", 500_000m);
         return new FeeSettings(
             ParseInt(map, "accounting", 5),
             ParseInt(map, "broker", 5),
             ParseDec(map, "faction", 0),
             ParseDec(map, "corp", 0),
-            Math.Clamp(ParseInt(map, "keep_days", 120), 1, 400));
+            Math.Clamp(ParseInt(map, "keep_days", 120), 1, 400),
+            ParseBool(map, "filter_cosmetics", true),
+            ParseBool(map, "filter_special_edition", true),
+            ParseBool(map, "filter_blueprints", true),
+            minSell < 0 ? 1_000_000m : minSell,
+            minHaul < 0 ? 500_000m : minHaul);
+    }
+
+    private static bool ParseBool(Dictionary<string, string> map, string key, bool fallback)
+    {
+        if (!map.TryGetValue(key, out var text) || string.IsNullOrWhiteSpace(text))
+            return fallback;
+        return text is "1" or "true" or "True" or "yes";
     }
 
     private async Task WithAsync(Func<SqliteConnection, Task> work, CancellationToken ct)
@@ -2216,7 +2271,9 @@ public sealed record LocationQuoteInsert(
     int BuyOrders,
     int SellOrders,
     long BuyTouch,
-    long SellTouch);
+    long SellTouch,
+    DateTime? BestBuyIssued = null,
+    DateTime? BestSellIssued = null);
 
 public sealed record HistoryNeed(int RegionId, int TypeId);
 

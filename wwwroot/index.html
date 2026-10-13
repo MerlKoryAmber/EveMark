@@ -150,6 +150,7 @@
     .nav-toggle { display: none; }
     .view { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .view[hidden] { display: none !important; }
+    .work[hidden] { display: none !important; }
     .toolbar {
       flex: 0 0 auto;
       display: flex;
@@ -237,8 +238,16 @@
       flex-direction: column;
       overflow: hidden;
       padding: var(--pad-y) var(--pad-x);
+      gap: var(--space-sm);
     }
-    .work-scroll { display: block; overflow: auto; }
+    /* Только страница настроек/ещё: вертикальный скролл полос. Таблицы — не сюда. */
+    .work-scroll {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+      overflow: auto;
+      scrollbar-width: thin;
+    }
     .table-wrap {
       flex: 1 1 0%;
       min-width: 0;
@@ -294,7 +303,7 @@
     table.data th:hover { color: var(--ir-accent); }
     table.data tbody tr:hover td { background: var(--ir-surface-hover); }
     .empty { padding: 24px; color: var(--ir-text-muted); text-align: center; }
-    table.data thead tr.cols th { top: 0; z-index: 3; }
+    table.data thead tr.cols th { top: 0; z-index: 3; background: var(--ir-primary-light); }
     table.data thead tr.filters th {
       top: 2.45rem;
       z-index: 2;
@@ -302,6 +311,9 @@
       background: var(--ir-surface);
       cursor: default;
     }
+    /* Угловая ячейка: и сверху, и слева */
+    table.data thead tr.cols th.left { top: 0; left: 0; z-index: 6; }
+    table.data thead tr.filters th.left { top: 2.45rem; left: 0; z-index: 5; }
     table.data thead tr.cols th.sorted::after { content: " ↓"; }
     table.data thead tr.cols th.sorted.asc::after { content: " ↑"; }
     .range { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
@@ -322,6 +334,66 @@
     th.compact .col-filter { min-width: 5.5rem; }
     th.thin .col-filter { min-width: 3.2rem; max-width: 4.2rem; }
     th.thin, td.thin { width: 1%; padding-left: 6px; padding-right: 6px; }
+    th.watch-pick, td.watch-pick {
+      width: 2.2rem;
+      text-align: center;
+      padding-left: 6px;
+      padding-right: 6px;
+      cursor: default;
+    }
+    th.watch-pick { cursor: default; }
+    th.watch-pick:hover { color: var(--ir-text-secondary); }
+    td.watch-pick input, th.watch-pick input { accent-color: var(--ir-accent); cursor: pointer; }
+    .warn-strip {
+      margin: 0 0 var(--space-sm);
+      padding: 0.55rem 0.75rem;
+      border: 1px solid #b8860b;
+      border-radius: var(--radius-sm);
+      background: rgba(184, 134, 11, 0.12);
+      color: var(--ir-text);
+      font-size: 0.9rem;
+    }
+    .warn-strip button { margin-left: 0.75rem; }
+    tr.trip-row { cursor: pointer; }
+    tr.trip-row.active td { background: var(--ir-surface-hover); }
+    .gank-hot { color: #e07070; font-weight: 600; }
+    #haul-trip-pane.work {
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    #hl-trips-wrap {
+      flex: 0 0 auto;
+      max-height: 34vh;
+    }
+    #hl-trips-wrap[hidden] { display: none !important; }
+    #hl-picked-bar {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      flex-wrap: wrap;
+      margin: 0 0 var(--space-sm);
+      padding: 0.45rem 0;
+      color: var(--ir-text-secondary);
+      font-size: 0.9rem;
+    }
+    #hl-picked-bar[hidden] { display: none !important; }
+    .haul-basket {
+      margin-top: var(--space-md);
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .haul-basket h3 { margin: 0 0 var(--space-sm); font-size: 1rem; font-weight: 600; }
+    .haul-basket .table-wrap {
+      flex: 0 0 auto;
+      max-height: 48vh;
+      min-height: 12rem;
+    }
+    #hl-trips-wrap[hidden] ~ .haul-basket .table-wrap {
+      max-height: 62vh;
+    }
+    details.haul-more { margin-top: var(--space-sm); color: var(--ir-text-secondary); font-size: 0.88rem; }
     th.name .col-filter { min-width: 8rem; }
     .col-filter:focus { outline: none; border-color: var(--ir-accent); }
     .pager {
@@ -350,19 +422,66 @@
       color: var(--ir-text);
     }
     .banner.quiet, .banner.early { color: var(--ir-text-muted); font-weight: 500; }
-    .card {
-      max-width: 36rem;
-      margin-bottom: var(--space-md);
+    .panel-strip, .card {
+      flex: 0 0 auto;
+      width: 100%;
+      max-width: none;
+      margin: 0;
       background: var(--ir-surface);
       border: 1px solid var(--ir-border);
       border-radius: var(--radius-md);
-      padding: var(--space-lg);
+      padding: var(--space-md) var(--space-lg);
     }
-    .card h3 { margin: 0 0 8px; font-size: 1rem; }
-    .card p { margin: 0 0 16px; color: var(--ir-text-muted); font-size: 0.88rem; }
-    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
-    .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; color: var(--ir-text-muted); }
-    .form-msg { min-height: 1.2em; margin-top: 12px; font-size: 0.88rem; }
+    .panel-strip h3, .card h3 { margin: 0 0 6px; font-size: 1rem; }
+    .panel-strip p, .card p { margin: 0 0 10px; color: var(--ir-text-muted); font-size: 0.88rem; }
+    .panel-strip p:last-child, .card p:last-child { margin-bottom: 0; }
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+      gap: 10px 16px;
+      align-items: end;
+      width: 100%;
+    }
+    .fields-check {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 28px;
+      align-items: center;
+      width: 100%;
+    }
+    .fields-check .field {
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.88rem;
+      color: var(--ir-text);
+      cursor: pointer;
+    }
+    .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; color: var(--ir-text-muted); min-width: 0; }
+    .field input, .field select {
+      width: 100%;
+      min-width: 0;
+      height: 2.2em;
+      padding: 0 0.7em;
+      border: 1px solid var(--ir-border);
+      border-radius: var(--radius-sm);
+      background: var(--ir-bg);
+      color: var(--ir-text);
+      font: inherit;
+      font-size: 0.88rem;
+    }
+    .field input[type="checkbox"] { width: auto; height: auto; accent-color: var(--ir-accent); }
+    .panel-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+    .panel-note { margin-top: 8px; font-size: 0.82rem; color: var(--ir-text-muted); line-height: 1.45; }
+    .form-msg { min-height: 1.2em; margin-top: 8px; font-size: 0.88rem; }
+    .pack-out {
+      white-space: pre-wrap;
+      font-size: 12px;
+      max-height: 160px;
+      overflow: auto;
+      margin: 8px 0 0;
+      width: 100%;
+    }
     .backdrop { display: none; }
     @media (max-width: 800px) {
       .nav-toggle {
@@ -384,7 +503,7 @@
       .sidebar.open { transform: none; }
       .backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 90; }
       .backdrop.show { display: block; }
-      .fields { grid-template-columns: 1fr; }
+      .fields { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -402,8 +521,8 @@
       <nav class="sidebar-nav">
         <button class="nav-item active" type="button" data-view="board">Закуп</button>
         <button class="nav-item" type="button" data-view="signal">Сигнал</button>
-        <button class="nav-item" type="button" data-view="haul">Развоз</button>
         <button class="nav-item" type="button" data-view="portfolio">Портфель</button>
+        <button class="nav-item" type="button" data-view="haul">Развоз</button>
         <button class="nav-item" type="button" data-view="watch">Слежение</button>
         <button class="nav-item" type="button" data-view="tools">Ещё</button>
         <button class="nav-item" type="button" data-view="fees">Настройки</button>
@@ -420,6 +539,7 @@
       <section class="view" id="view-board">
         <div class="toolbar">
           <button id="collect" class="btn" type="button">Снять сейчас</button>
+          <button id="board-watch-add" class="btn btn-secondary" type="button" title="Отмеченные строки → слежение на Jita 4-4">В слежение</button>
           <div class="col-picker" id="board-picker">
             <button id="board-cols" class="btn btn-secondary" type="button">Столбцы</button>
             <div class="col-menu" id="board-cols-menu" hidden></div>
@@ -436,6 +556,7 @@
               <table class="data">
                 <thead>
                   <tr class="cols">
+                    <th class="watch-pick" data-k="watchPick" title="Отметить для слежения"><input id="board-watch-all" type="checkbox" aria-label="Выбрать все на странице"></th>
                     <th class="left" data-k="name">Предмет</th>
                     <th data-k="bestBuy">Покупка</th>
                     <th data-k="bestSell">Продажа</th>
@@ -445,18 +566,19 @@
                     <th data-k="competitors">Конкур.</th>
                     <th data-k="captureShare">Доля</th>
                     <th data-k="stationVolume24h">Станция 24ч</th>
-                    <th class="sorted" data-k="dailyIsk" title="Маржа × min(доля×медиана7д, полосы 1%)">Оценка/сутки</th>
+                    <th class="sorted" data-k="dailyIsk">Оценка/сутки</th>
                     <th data-k="hours">Часов</th>
-                    <th data-k="relists" title="Сколько раз можно опустить продажу, пока маржа не кончится. Advanced Broker Relations 0: плата 50% брокерской от цены продажи. Минимум 100 ISK за приказ в это число не входит.">Перестановок</th>
-                    <th data-k="buyVolume" title="Объём и ордера в пределах 1% от лучшей цены покупки">На покупке</th>
-                    <th data-k="buyTouch" title="Штук ровно по лучшей цене покупки. Прочерк — этот снимок ещё без отдельного счёта.">На лучшей покупке</th>
-                    <th data-k="sellVolume" title="Объём и ордера в пределах 1% от лучшей цены продажи">На продаже</th>
-                    <th data-k="sellTouch" title="Штук ровно по лучшей цене продажи. Прочерк — этот снимок ещё без отдельного счёта.">На лучшей продаже</th>
-                    <th data-k="capital" title="Покупка × меньшая из двух полос 1%. Столько ISK заморозить, чтобы занять обе стороны.">Капитал</th>
-                    <th data-k="days" title="Объём обеих полос делить на вчерашние продажи The Forge.">Дней</th>
-                    <th data-k="dailyRoi" title="Оценка за сутки делить на капитал.">В день</th>
+                    <th data-k="relists">Перестановок</th>
+                    <th data-k="buyVolume">На покупке</th>
+                    <th data-k="buyTouch">На лучшей покупке</th>
+                    <th data-k="sellVolume">На продаже</th>
+                    <th data-k="sellTouch">На лучшей продаже</th>
+                    <th data-k="capital">Капитал</th>
+                    <th data-k="days">Дней</th>
+                    <th data-k="dailyRoi">В день</th>
                   </tr>
                   <tr class="filters">
+                    <th class="watch-pick"></th>
                     <th class="left name"><input class="col-filter" data-f="name" type="search" aria-label="Предмет"></th>
                     <th class="money"><span class="range"><input class="col-filter" data-f="bestBuyMin" data-g="1" type="search" placeholder="от" aria-label="Покупка от"><input class="col-filter" data-f="bestBuyMax" data-g="1" type="search" placeholder="до" aria-label="Покупка до"></span></th>
                     <th class="money"><span class="range"><input class="col-filter" data-f="bestSellMin" data-g="1" type="search" placeholder="от" aria-label="Продажа от"><input class="col-filter" data-f="bestSellMax" data-g="1" type="search" placeholder="до" aria-label="Продажа до"></span></th>
@@ -516,7 +638,7 @@
                     <th data-k="marginIsk">Маржа</th>
                     <th data-k="marginFrac">%</th>
                     <th data-k="dailyVolume">Объём/сутки</th>
-                    <th class="sorted" data-k="dailyIsk" title="Маржа × минимум из вчерашнего объёма и обеих полос 1%">Оценка/сутки</th>
+                    <th class="sorted" data-k="dailyIsk">Оценка/сутки</th>
                     <th data-k="hours">Часов</th>
                   </tr>
                   <tr class="filters">
@@ -545,28 +667,17 @@
 
       <section class="view" id="view-haul" hidden>
         <div class="toolbar">
-          <div class="col-picker" id="haul-picker">
-            <button id="haul-cols" class="btn btn-secondary" type="button">Столбцы</button>
-            <div class="col-menu" id="haul-cols-menu" hidden></div>
-          </div>
-          <button id="haul-pack-run" class="btn" type="button">Собрать рюкзак</button>
-          <span class="toolbar-hint" id="haul-hint">Купить чужой sell от 500 тыс., отвезти. Мгновенно — в чужой buy (без брокерской). Либо выставить свой sell на месте назначения.</span>
+          <button class="btn" type="button" data-haul-tab="board">Доска</button>
+          <button class="btn btn-secondary" type="button" data-haul-tab="trip">Рейс</button>
+          <span class="toolbar-hint" id="haul-hint">Купить чужой sell от 500 тыс., отвезти. Мгновенно — в чужой buy. Либо выставить свой sell на месте.</span>
         </div>
-        <div class="card" id="haul-pack-card" style="margin:0 16px 12px">
-          <div class="fields">
-            <label class="field">Трюм м³<input id="pack-cargo" type="number" min="1" step="1" value="30000"></label>
-            <label class="field">Бюджет ISK<input id="pack-budget" type="number" min="0" step="1000000" value="500000000"></label>
-            <label class="field">Коллатерал cap<input id="pack-coll" type="number" min="0" step="1000000" value="0"></label>
-            <label class="field"><input id="pack-secure" type="checkbox" checked> Только secure (хайсек)</label>
+        <div id="haul-board-pane" class="work">
+          <div class="toolbar" style="padding:0 0 8px">
+            <div class="col-picker" id="haul-picker">
+              <button id="haul-cols" class="btn btn-secondary" type="button">Столбцы</button>
+              <div class="col-menu" id="haul-cols-menu" hidden></div>
+            </div>
           </div>
-          <p class="form-msg" id="pack-msg"></p>
-          <pre id="pack-out" style="white-space:pre-wrap;font-size:12px;max-height:220px;overflow:auto;margin:8px 0 0" hidden></pre>
-          <p style="margin-top:8px">
-            <button id="pack-copy-mb" class="btn btn-secondary" type="button" hidden>Copy multibuy</button>
-            <button id="pack-copy-csv" class="btn btn-secondary" type="button" hidden>Copy CSV</button>
-          </p>
-        </div>
-        <div class="work">
           <div class="table-wrap">
             <div class="table-scroll">
               <table class="data" id="haul-table">
@@ -617,40 +728,226 @@
             <button id="haul-next" class="btn btn-secondary" type="button">→</button>
           </div>
         </div>
+        <div id="haul-trip-pane" class="work" hidden>
+          <div id="haul-fresh-warn" class="warn-strip" hidden></div>
+          <div class="panel-strip">
+            <div class="fields">
+              <label class="field">Откуда
+                <select id="hl-from">
+                  <option value="any">любой</option>
+                  <option value="jita" selected>Jita</option>
+                  <option value="perimeter">Perimeter</option>
+                  <option value="amarr">Amarr</option>
+                  <option value="dodixie">Dodixie</option>
+                  <option value="rens">Rens</option>
+                  <option value="hek">Hek</option>
+                </select>
+              </label>
+              <label class="field">Куда
+                <select id="hl-to">
+                  <option value="any" selected>любой</option>
+                  <option value="jita">Jita</option>
+                  <option value="perimeter">Perimeter</option>
+                  <option value="amarr">Amarr</option>
+                  <option value="dodixie">Dodixie</option>
+                  <option value="rens">Rens</option>
+                  <option value="hek">Hek</option>
+                </select>
+              </label>
+              <label class="field">Корабль
+                <select id="hl-ship">
+                  <option value="br">Blockade Runner 10k</option>
+                  <option value="dst" selected>DST 60k</option>
+                  <option value="freighter">Фрейтер 1M</option>
+                  <option value="custom">Своё</option>
+                </select>
+              </label>
+              <label class="field">Трюм м³<input id="hl-cargo" class="isk-input" type="text" inputmode="numeric" value="60 000"></label>
+              <label class="field">Бюджет ISK<input id="hl-budget" class="isk-input" data-g="1" type="text" inputmode="numeric" value="1 000 000 000"></label>
+              <label class="field">Макс. груз ISK<input id="hl-max-cargo" class="isk-input" data-g="1" type="text" inputmode="numeric" value="1 500 000 000"></label>
+              <label class="field" title="в скупку — в чужой buy на B; выставить — свой sell: min(best_sell−tick, avg истории), ask старше 7д не якорь; плюс объём≥10, ≥3 sell, вилка≤2×, цена≤1.5× закупки. Лучшее — что прибыльнее по типу.">Режим
+                <select id="hl-mode">
+                  <option value="best" selected>лучшее</option>
+                  <option value="instant">в скупку</option>
+                  <option value="list">выставить</option>
+                </select>
+              </label>
+              <label class="field">Маршрут
+                <select id="hl-route">
+                  <option value="secure" selected>только хайсек</option>
+                  <option value="shortest">кратчайший</option>
+                </select>
+              </label>
+              <label class="field" id="hl-horizon-wrap">Горизонт, сут<input id="hl-horizon" type="number" min="0.1" max="30" step="0.1" value="3"></label>
+              <button id="hl-run" class="btn" type="button">Пересчитать</button>
+            </div>
+            <details class="haul-more">
+              <summary>Курьерка и прочее</summary>
+              <div class="fields" style="margin-top:8px">
+                <label class="field">Сек/прыжок<input id="hl-sec" type="number" min="10" max="600" value="60"></label>
+                <label class="field">Мин. прибыль позиции<input id="hl-min-profit" class="isk-input" data-g="1" type="text" value="1 000 000"></label>
+                <label class="field" title="Ask на B старше этого не якорь для выставления — только история региона">Макс. возраст ask, сут<input id="hl-ask-age" type="number" min="0" max="365" step="1" value="7"></label>
+                <label class="field" title="Сколько дней daily_history региона B брать для потолка цены list">История цен, сут<input id="hl-hist-days" type="number" min="1" max="90" step="1" value="14"></label>
+                <label class="field">Курьер фикс<input id="hl-c-base" class="isk-input" data-g="1" type="text" value="0"></label>
+                <label class="field">Курьер /м³<input id="hl-c-m3" class="isk-input" data-g="1" type="text" value="0"></label>
+                <label class="field">Курьер /прыжок<input id="hl-c-jump" class="isk-input" data-g="1" type="text" value="0"></label>
+                <label class="field">Курьер % залога<input id="hl-c-pct" type="number" min="0" step="0.1" value="0"></label>
+              </div>
+              <p class="toolbar-hint">Тарифы курьерки по умолчанию 0. Возьмите актуальные с сайта курьерки.</p>
+            </details>
+            <p class="toolbar-hint" id="hl-mode-hint">Режим «лучшее»: по типу берётся в скупку или выставить — что даёт больше прибыли. Клик по заголовку столбца — сортировка.</p>
+            <p class="form-msg" id="hl-msg"></p>
+          </div>
+          <div class="table-wrap" id="hl-trips-wrap">
+            <div class="table-scroll">
+              <table class="data" id="hl-trips-table">
+                <thead>
+                  <tr class="cols">
+                    <th class="left" data-k="route" title="Пара хабов A→B. Клик — сортировка">Откуда → Куда</th>
+                    <th data-k="jumps" title="Число прыжков ESI (хайсек или кратчайший). Клик — сортировка">Прыжков</th>
+                    <th data-k="min_sec" title="Минимальный security_status на пути (0.5+ = хайсек в игре). Клик — сортировка">Мин. sec</th>
+                    <th data-k="gank" title="Известные ганк-системы на маршруте; красный если груз выше порога. Клик — сортировка">Ганк</th>
+                    <th data-k="items" title="Сколько разных предметов в корзине. Клик — сортировка">Позиций</th>
+                    <th data-k="fill_pct" title="Заполнение трюма, % от заданных м³. Клик — сортировка">Трюм %</th>
+                    <th data-k="cost" title="Сумма закупки на A (= стоимость груза для ганка). Клик — сортировка">Груз, ISK</th>
+                    <th class="sorted" data-k="profit" title="Суммарная прибыль корзины после налога (и брокерской в режиме выставить). Клик — сортировка">Прибыль</th>
+                    <th data-k="roi_pct" title="Прибыль / стоимость закупки × 100. Клик — сортировка">ROI %</th>
+                    <th data-k="isk_per_jump" title="Прибыль / прыжки. Клик — сортировка">ISK/прыжок</th>
+                    <th data-k="isk_per_hour" title="Прибыль / (прыжки × сек/прыжок). Клик — сортировка">ISK/час</th>
+                    <th data-k="days_to_sell" title="Макс. дней до распродажи выставленных позиций (instant = 0). Клик — сортировка">Продажа, дн</th>
+                    <th id="hl-col-courier" data-k="profit_courier" title="Прибыль минус тариф курьерки. Скрыто, если тарифы 0. Клик — сортировка">С курьеркой</th>
+                  </tr>
+                </thead>
+                <tbody id="hl-trips-body"></tbody>
+              </table>
+              <div class="empty" id="hl-trips-empty" hidden>Нет корзин под лимиты. Снимите свежий снимок или ослабьте фильтры.</div>
+            </div>
+          </div>
+          <div id="hl-picked-bar" hidden>
+            <span id="hl-picked-label"></span>
+            <button id="hl-change-trip" class="btn btn-secondary" type="button">Сменить рейс</button>
+          </div>
+          <div class="haul-basket" id="hl-basket" hidden>
+            <h3 id="hl-basket-title">Корзина</h3>
+            <div class="panel-actions" style="margin-bottom:8px">
+              <button id="hl-copy-mb" class="btn btn-secondary" type="button">Копировать мультибай</button>
+              <button id="hl-copy-csv" class="btn btn-secondary" type="button">CSV</button>
+              <button id="hl-copy-names" class="btn btn-secondary" type="button">Копировать названия</button>
+            </div>
+            <p class="toolbar-hint">Проверьте в мультибае EVE, что покупка идёт на текущей станции, и сверьте итог с суммой здесь.</p>
+            <div class="table-wrap">
+              <div class="table-scroll" id="hl-basket-scroll">
+                <table class="data" id="hl-basket-table">
+                  <thead>
+                    <tr class="cols">
+                      <th class="left" data-k="name" title="Название. Клик — сортировка">Предмет</th>
+                      <th data-k="mode" title="instant = в чужой buy на B; list = свой sell на B. Клик — сортировка">Режим</th>
+                      <th data-k="qty" title="Штук в корзине. Клик — сортировка">Шт</th>
+                      <th data-k="m3" title="Суммарный упакованный объём позиции. Клик — сортировка">м³</th>
+                      <th data-k="buy_avg" title="Средняя цена закупки на A. Клик — сортировка">Buy avg</th>
+                      <th data-k="buy_max" title="Самая дорогая цена покупки на A в этой позиции. Клик — сортировка">Buy max</th>
+                      <th data-k="cost" title="Сумма закупки позиции. Клик — сортировка">Стоимость</th>
+                      <th data-k="sell_avg" title="Средняя цена продажи на B (buy или sell_post). Клик — сортировка">Sell avg</th>
+                      <th data-k="sell_min" title="Нижняя цена продажи на B в этой позиции. Клик — сортировка">Sell min</th>
+                      <th class="sorted" data-k="profit" title="Прибыль позиции после комиссий. Клик — сортировка">Прибыль</th>
+                      <th data-k="profit_pct" title="Прибыль / стоимость × 100. Клик — сортировка">%</th>
+                      <th data-k="volume_day_B" title="Медиана объёма/сутки в регионе B (для list). Клик — сортировка">Объём B</th>
+                      <th data-k="days_to_sell" title="Оценка дней до распродажи (только list). Клик — сортировка">Дн</th>
+                      <th data-k="ask_age_days" title="Возраст лучшего sell на B, суток (issued ESI). Клик — сортировка">Возраст ask</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hl-basket-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="view" id="view-portfolio" hidden>
         <div class="toolbar">
-          <button id="portfolio-run" class="btn" type="button">Собрать корзину</button>
-          <span class="toolbar-hint">Капитал + слоты (Trade/Retail/…) + Margin Trading → жадная корзина buy+sell.</span>
+          <button id="portfolio-run" class="btn" type="button">Пересчитать</button>
+          <button id="portfolio-watch-add" class="btn btn-secondary" type="button" title="Отмеченные → слежение на Jita 4-4">В слежение</button>
+          <button id="portfolio-copy" class="btn btn-secondary" type="button">Копировать названия</button>
+          <button id="portfolio-excluded-btn" class="btn btn-secondary" type="button">Исключённые (0)</button>
+          <div class="col-picker">
+            <button id="portfolio-cols" class="btn btn-secondary" type="button">Столбцы</button>
+            <div class="col-menu" id="portfolio-cols-menu" hidden></div>
+          </div>
+          <span class="toolbar-hint">Станционная торговля: buy+sell, 2 слота на тип. Не ставит ордера.</span>
         </div>
-        <div class="work work-scroll">
-          <div class="card">
+        <div class="work">
+          <div class="panel-strip">
             <div class="fields">
-              <label class="field">Капитал ISK<input id="pf-capital" type="number" min="0" step="1000000" value="1000000000"></label>
-              <label class="field">Trade 0–5<input id="pf-trade" type="number" min="0" max="5" value="5"></label>
-              <label class="field">Retail 0–5<input id="pf-retail" type="number" min="0" max="5" value="0"></label>
-              <label class="field">Wholesale 0–5<input id="pf-wholesale" type="number" min="0" max="5" value="0"></label>
-              <label class="field">Tycoon 0–5<input id="pf-tycoon" type="number" min="0" max="5" value="0"></label>
-              <label class="field">Margin Trading 0–5<input id="pf-margin" type="number" min="0" max="5" value="0"></label>
+              <label class="field" title="Свободный капитал. Можно 1.5b, 500m, 200k.">Капитал ISK
+                <input id="pf-capital" class="isk-input" data-g="1" type="text" inputmode="numeric" value="1 000 000 000">
+              </label>
+              <label class="field">Слоты
+                <select id="pf-slots-mode">
+                  <option value="manual">вручную</option>
+                  <option value="skills">по скиллам</option>
+                </select>
+              </label>
+              <label class="field" id="pf-slots-wrap">Свободные слоты
+                <input id="pf-slots" type="number" min="0" step="1" value="20">
+              </label>
+              <label class="field pf-skill" hidden>Trade 0–5<input id="pf-trade" type="number" min="0" max="5" value="0"></label>
+              <label class="field pf-skill" hidden>Retail 0–5<input id="pf-retail" type="number" min="0" max="5" value="0"></label>
+              <label class="field pf-skill" hidden>Wholesale 0–5<input id="pf-wholesale" type="number" min="0" max="5" value="0"></label>
+              <label class="field pf-skill" hidden>Tycoon 0–5<input id="pf-tycoon" type="number" min="0" max="5" value="0"></label>
+              <label class="field pf-skill" hidden>Занято слотов<input id="pf-slots-used" type="number" min="0" value="0"></label>
+              <label class="field pf-skill" hidden>Итого слотов<span id="pf-slots-total" style="height:2.2em;display:flex;align-items:center;color:var(--ir-text)">5</span></label>
+              <label class="field" title="На сколько суток вперёд закупать партию">Горизонт, сут
+                <input id="pf-horizon" type="number" min="0.1" max="30" step="0.1" value="2">
+              </label>
+              <label class="field" title="Макс. доля капитала в одну позицию, %">Макс. доля %
+                <input id="pf-max-share" type="number" min="1" max="100" step="1" value="20">
+              </label>
+              <label class="field" title="Позиции ниже порога не брать">Мин. прибыль/сут
+                <input id="pf-min-profit" class="isk-input" data-g="1" type="text" inputmode="numeric" value="1 000 000">
+              </label>
+              <label class="field">Мин. часов
+                <input id="pf-min-hours" type="number" min="0" value="6">
+              </label>
             </div>
+            <div class="fields-check" style="margin-top:8px">
+              <label class="field"><input id="pf-src-jita" type="checkbox" checked> Jita</label>
+              <label class="field"><input id="pf-src-perimeter" type="checkbox" checked> Perimeter</label>
+            </div>
+            <p class="panel-note" id="pf-totals">—</p>
             <p class="form-msg" id="pf-msg"></p>
+            <p class="panel-note" id="pf-rejected"></p>
           </div>
           <div class="table-wrap">
             <div class="table-scroll">
-              <table class="data">
+              <table class="data" id="portfolio-table">
                 <thead>
                   <tr class="cols">
-                    <th class="left">Предмет</th>
-                    <th>Шт</th>
-                    <th>Эскроу</th>
-                    <th>Оценка/сутки</th>
-                    <th>Слоты</th>
+                    <th class="watch-pick" data-k="watchPick" title="Отметить для слежения"><input id="pf-watch-all" type="checkbox" aria-label="Выбрать все"></th>
+                    <th class="left" data-k="name">Предмет</th>
+                    <th class="left" data-k="location">Где</th>
+                    <th data-k="buy">Покупка</th>
+                    <th data-k="sell">Продажа</th>
+                    <th data-k="buy_post">Ставить buy</th>
+                    <th data-k="sell_post">Ставить sell</th>
+                    <th data-k="margin">Маржа</th>
+                    <th data-k="margin_pct">%</th>
+                    <th data-k="qty">Штук</th>
+                    <th data-k="capital">Капитал</th>
+                    <th data-k="volume_day">Объём/сутки</th>
+                    <th data-k="competitors">Конкурентов</th>
+                    <th data-k="share_pct">Доля</th>
+                    <th data-k="relists_day">Перест./сутки</th>
+                    <th class="sorted" data-k="profit_day">Прибыль/сутки</th>
+                    <th data-k="roi_day_pct">%/сутки</th>
+                    <th data-k="turnover_days">Оборот, дн</th>
+                    <th data-k="hours">Часов</th>
+                    <th data-k="act"></th>
                   </tr>
                 </thead>
                 <tbody id="pf-body"></tbody>
               </table>
-              <div class="empty" id="pf-empty" hidden>Нет кандидатов — нужен свежий снимок.</div>
+              <div class="empty" id="pf-empty" hidden>Нет позиций под эти условия. Снизьте мин. прибыль или мин. часы, или подождите накопления снимков.</div>
             </div>
           </div>
         </div>
@@ -661,44 +958,60 @@
           <span class="toolbar-hint">Контракты, заметки/blacklist, бэктест Крик, мини-рефайн.</span>
         </div>
         <div class="work work-scroll">
-          <div class="card">
+          <div class="panel-strip">
             <h3>Публичные контракты (The Forge)</h3>
-            <p><button id="contracts-run" class="btn" type="button">Сканировать</button></p>
-            <p class="form-msg" id="contracts-msg"></p>
-            <div class="table-wrap" style="margin-top:8px">
-              <table class="data"><thead><tr class="cols"><th class="left">Контракт</th><th class="left">Предмет</th><th>Цена</th><th>Рынок</th><th>Выгода</th></tr></thead>
-              <tbody id="contracts-body"></tbody></table>
+            <div class="panel-actions">
+              <button id="contracts-run" class="btn" type="button">Сканировать</button>
+              <span class="form-msg" id="contracts-msg" style="margin:0"></span>
+            </div>
+            <div class="table-wrap" style="margin-top:8px;min-height:12rem;max-height:40vh">
+              <div class="table-scroll">
+                <table class="data" id="contracts-table">
+                  <thead>
+                    <tr class="cols">
+                      <th class="left" data-k="cContract">Контракт</th>
+                      <th class="left" data-k="cItem">Предмет</th>
+                      <th data-k="cPrice">Цена</th>
+                      <th data-k="cMarket">Рынок</th>
+                      <th data-k="cEdge">Выгода</th>
+                    </tr>
+                  </thead>
+                  <tbody id="contracts-body"></tbody>
+                </table>
+              </div>
             </div>
           </div>
-          <div class="card">
+          <div class="panel-strip">
             <h3>Заметки / blacklist</h3>
             <div class="fields">
               <label class="field">typeId<input id="note-type" type="number" min="1"></label>
               <label class="field">Заметка<input id="note-text" type="text" maxlength="200"></label>
-              <label class="field"><input id="note-bl" type="checkbox"> В blacklist</label>
+              <label class="field">Blacklist
+                <span class="fields-check" style="height:2.2em"><label class="field"><input id="note-bl" type="checkbox"> да</label></span>
+              </label>
+              <label class="field">&nbsp;<button id="note-save" class="btn" type="button" style="width:100%">Сохранить</button></label>
             </div>
-            <p style="margin-top:8px"><button id="note-save" class="btn" type="button">Сохранить</button></p>
             <p class="form-msg" id="note-msg"></p>
-            <ul id="note-list" style="margin-top:8px;padding-left:18px;font-size:13px"></ul>
+            <ul id="note-list" style="margin:8px 0 0;padding-left:18px;font-size:13px"></ul>
           </div>
-          <div class="card">
+          <div class="panel-strip">
             <h3>Бэктест «Крик» (грубый)</h3>
             <div class="fields">
               <label class="field">Дней<input id="bt-days" type="number" min="1" max="120" value="30"></label>
+              <label class="field">&nbsp;<button id="bt-run" class="btn" type="button" style="width:100%">Считать</button></label>
             </div>
-            <p style="margin-top:8px"><button id="bt-run" class="btn" type="button">Считать</button></p>
-            <pre id="bt-out" style="white-space:pre-wrap;font-size:12px;margin-top:8px"></pre>
+            <pre class="pack-out" id="bt-out"></pre>
           </div>
-          <div class="card">
+          <div class="panel-strip">
             <h3>Рефайн (мини, без SDE)</h3>
-            <p style="font-size:13px;opacity:.85">Известные руды: 18 Veldspar, 19 Scordite, 20 Pyroxeres, 21 Plagioclase, 22 Omber…</p>
+            <p>Известные руды: 18 Veldspar, 19 Scordite, 20 Pyroxeres, 21 Plagioclase, 22 Omber…</p>
             <div class="fields">
               <label class="field">ore typeId<input id="rf-ore" type="number" min="1" value="18"></label>
-              <label class="field">Штук<input id="rf-units" type="number" min="100" step="100" value="10000"></label>
+              <label class="field">Штук<input id="rf-units" class="isk-input" data-g="1" type="text" inputmode="numeric" value="10 000"></label>
               <label class="field">Эффективность 0–1<input id="rf-eff" type="number" min="0.01" max="1" step="0.01" value="0.52"></label>
+              <label class="field">&nbsp;<button id="rf-run" class="btn" type="button" style="width:100%">Считать</button></label>
             </div>
-            <p style="margin-top:8px"><button id="rf-run" class="btn" type="button">Считать</button></p>
-            <pre id="rf-out" style="white-space:pre-wrap;font-size:12px;margin-top:8px"></pre>
+            <pre class="pack-out" id="rf-out"></pre>
           </div>
         </div>
       </section>
@@ -706,10 +1019,10 @@
       <section class="view" id="view-watch" hidden>
         <div class="toolbar">
           <button id="watch-poll" class="btn btn-secondary" type="button">Опросить сейчас</button>
-          <span class="toolbar-hint">Список опрашивается каждые 5 мин (ETag). По дельте volume_remain считаются сделки на станции.</span>
+          <span class="toolbar-hint">Отмечайте типы на Закупе/Портфеле → «В слежение». Опрос каждые 5 мин (ETag), сделки по дельте volume_remain.</span>
         </div>
-        <div class="work work-scroll">
-          <div class="card">
+        <div class="work">
+          <div class="panel-strip">
             <h3>Добавить в слежение</h3>
             <div class="fields">
               <label class="field">typeId
@@ -727,8 +1040,10 @@
               <label class="field">Заметка
                 <input id="watch-note" type="text" maxlength="120">
               </label>
+              <label class="field">&nbsp;
+                <button id="watch-add" class="btn" type="button" style="width:100%">Добавить</button>
+              </label>
             </div>
-            <p style="margin-top:12px"><button id="watch-add" class="btn" type="button">Добавить</button></p>
             <p class="form-msg" id="watch-msg"></p>
           </div>
           <div class="table-wrap">
@@ -736,11 +1051,11 @@
               <table class="data">
                 <thead>
                   <tr class="cols">
-                    <th class="left">Предмет</th>
-                    <th class="left">Станция</th>
-                    <th>typeId</th>
-                    <th class="left">Заметка</th>
-                    <th></th>
+                    <th class="left" data-k="name">Предмет</th>
+                    <th class="left" data-k="watchLoc">Станция</th>
+                    <th data-k="watchType">typeId</th>
+                    <th class="left" data-k="watchNote">Заметка</th>
+                    <th data-k="watchAct"></th>
                   </tr>
                 </thead>
                 <tbody id="watch-body"></tbody>
@@ -757,15 +1072,9 @@
           <span class="toolbar-hint">Срок в днях. Старше него стирается сразу и после каждого снимка.</span>
         </div>
         <div class="work work-scroll">
-          <div class="card">
+          <div class="panel-strip">
             <h3>Налог и брокерская</h3>
-            <p>
-              Accounting снижает налог с продажи от 7,5%. Broker Relations и стендинг к владельцу станции снижают брокерскую, пол — 1%.
-              Маржа считает постановку buy и sell: брокерская с обеих сторон, налог только с продажи. Перестановка ордера не входит.
-              Закуп и сигнал собирают Jita 4-4 и структуры Perimeter. Развоз смотрит ещё Amarr, Dodixie, Rens и Hek: купить чужой sell, отвезти, продать в чужой buy; брокерская не входит, налог с продажи — да.
-              Объём — продажи вчера по The Forge. День старше вчерашнего в этот столбец не входит. «На покупке» и «На продаже» — объём и число ордеров в пределах 1% от лучшей цены на своей стороне. Оценка — маржа с единицы, умноженная на меньшее из вчерашнего объёма и этих двух полос. Таблица по 200 строк, дальше стрелки внизу. У цифр два поля друг под другом: «от» и «до», пустое не ограничивает. Процент вводится как в столбце. «На покупке» и «На продаже» фильтруют штуки, не число ордеров.
-              «Часов» — сколько последних снимков подряд маржа была плюсовой; разрыв больше 90 минут обрывает ряд.
-            </p>
+            <p>Accounting — налог с продажи. Broker Relations и стендинги — брокерская (пол 1%). Маржа: брокер с buy и sell, налог только с продажи.</p>
             <div class="fields">
               <label class="field">Accounting (0–5)
                 <input id="accounting" type="number" min="0" max="5" step="1" value="5">
@@ -782,12 +1091,36 @@
             </div>
             <div class="form-msg" id="form-msg"></div>
           </div>
-          <div class="card">
+          <div class="panel-strip">
+            <h3>Что не грузить</h3>
+            <p>Галочки отсекают типы по имени при синке и при сохранении. Сняли галку — отсев снимается для следующего снимка.</p>
+            <div class="fields-check">
+              <label class="field" title="Скины (SKIN), одежда Men's/Women's, Apparel, Camo, куртки и т.п.">
+                <input id="filter-cosmetics" type="checkbox" checked> Украшения (скины, одежда…)
+              </label>
+              <label class="field" title="Имя содержит Special Edition Assets">
+                <input id="filter-special" type="checkbox" checked> Special Edition Assets
+              </label>
+              <label class="field" title="Имя содержит Blueprint (BPO/BPC)">
+                <input id="filter-blueprints" type="checkbox" checked> Блюпринты
+              </label>
+            </div>
+          </div>
+          <div class="panel-strip">
+            <h3>Пороги цены при загрузке</h3>
+            <p>В новый съём попадают только sell не дешевле порога. Уже записанные дешёвые строки сами не исчезнут.</p>
+            <div class="fields">
+              <label class="field" title="Минимальная цена лучшего sell для доски закупа. По умолчанию 1 000 000 ISK.">Мин. sell закуп, ISK
+                <input id="min-sell" class="isk-input" data-g="1" type="text" inputmode="numeric" value="1 000 000">
+              </label>
+              <label class="field" title="Минимальная цена sell для книги развоза. По умолчанию 500 000 ISK.">Мин. sell развоз, ISK
+                <input id="min-haul" class="isk-input" data-g="1" type="text" inputmode="numeric" value="500 000">
+              </label>
+            </div>
+          </div>
+          <div class="panel-strip">
             <h3>База</h3>
-            <p>
-              Снимки и дневная история старше срока удаляются. Файл после этого не растёт: свободные страницы занимают новые снимки.
-              Сохранение ещё и ужимает файл. Журнал рядом с базой держится в пределах 2 МБ.
-            </p>
+            <p>Снимки и дневная история старше срока удаляются. Сохранение ещё и ужимает файл. Журнал — до 2 МБ.</p>
             <div class="fields">
               <label class="field">Хранить, дней (1–400)
                 <input id="keep-days" type="number" min="1" max="400" step="1" value="120">
@@ -800,11 +1133,31 @@
     </div>
   </div>
   <script>
-    const isk = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
-    const iskWhole = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
     const pct = new Intl.NumberFormat("ru-RU", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    /** Разделители тысяч обычным пробелом (узкий NBSP в части шрифтов почти не виден). */
+    function fmtNum(value, maxFrac) {
+      if (value == null || value === "") return "—";
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return new Intl.NumberFormat("ru-RU", {
+        useGrouping: true,
+        maximumFractionDigits: maxFrac,
+        minimumFractionDigits: 0
+      }).format(n).replace(/[\u00a0\u202f]/g, " ");
+    }
+    const isk = { format: v => fmtNum(v, 2) };
+    const iskWhole = { format: v => fmtNum(v, 0) };
     const titles = { board: "Закуп", signal: "Сигнал", haul: "Развоз", portfolio: "Портфель", watch: "Слежение", tools: "Ещё", fees: "Настройки" };
-    let lastPack = null;
+    let lastTrips = null;
+    let lastTripDetail = null;
+    let lastBasketRows = [];
+    let basketSort = "profit";
+    let basketDir = -1;
+    let tripsSort = "profit";
+    let tripsDir = -1;
+    let haulTab = "board";
+    let hlTimer = null;
+    const shipM3 = { br: 10000, dst: 60000, freighter: 1000000 };
     const watchHubs = {
       jita: { locationId: 60003760, regionId: 10000002 },
       amarr: { locationId: 60008494, regionId: 10000043 },
@@ -828,7 +1181,7 @@
     function readHidden(key) {
       try {
         const list = JSON.parse(localStorage.getItem(key) || "[]");
-        return new Set(Array.isArray(list) ? list.filter(k => k !== "name") : []);
+        return new Set(Array.isArray(list) ? list.filter(k => k !== "name" && k !== "watchPick") : []);
       } catch {
         return new Set();
       }
@@ -839,16 +1192,21 @@
     }
 
     function applyColumns(root, hidden) {
-      const heads = [...root.querySelectorAll("tr.cols th")];
-      const filters = [...root.querySelectorAll("tr.filters th")];
-      heads.forEach((th, i) => {
-        const off = hidden.has(th.dataset.k);
-        th.classList.toggle("col-off", off);
-        if (filters[i]) filters[i].classList.toggle("col-off", off);
-      });
-      root.querySelectorAll("tbody tr").forEach(tr => {
-        [...tr.children].forEach((td, i) => {
-          td.classList.toggle("col-off", hidden.has(heads[i]?.dataset.k));
+      // По каждой таблице отдельно: иначе заголовки доски/рейса/корзины
+      // склеиваются в один список и ячейки съезжают относительно th.
+      root.querySelectorAll("table").forEach(table => {
+        const heads = [...table.querySelectorAll("thead tr.cols th")];
+        if (heads.length === 0) return;
+        const filters = [...table.querySelectorAll("thead tr.filters th")];
+        heads.forEach((th, i) => {
+          const off = hidden.has(th.dataset.k);
+          th.classList.toggle("col-off", off);
+          if (filters[i]) filters[i].classList.toggle("col-off", off);
+        });
+        table.querySelectorAll("tbody tr").forEach(tr => {
+          [...tr.children].forEach((td, i) => {
+            td.classList.toggle("col-off", hidden.has(heads[i]?.dataset.k));
+          });
         });
       });
     }
@@ -857,6 +1215,7 @@
       menu.replaceChildren();
       for (const th of heads) {
         const key = th.dataset.k;
+        if (key === "watchPick" || key === "act") continue;
         const label = document.createElement("label");
         const box = document.createElement("input");
         box.type = "checkbox";
@@ -867,14 +1226,41 @@
           else hidden.add(key);
           save();
         });
-        label.append(box, document.createTextNode(th.textContent));
+        label.append(box, document.createTextNode(th.textContent || key));
         menu.appendChild(label);
+      }
+    }
+
+    async function addCheckedToWatch(rootSelector, statusEl) {
+      const boxes = [...document.querySelectorAll(`${rootSelector} .watch-pick-cb:checked:not(:disabled)`)];
+      const ids = [...new Set(boxes.map(b => Number(b.dataset.t)).filter(id => id > 0))];
+      if (!ids.length) {
+        if (statusEl) { statusEl.textContent = "Ничего не отмечено"; statusEl.className = "form-msg err"; }
+        return;
+      }
+      const hub = watchHubs.jita;
+      if (statusEl) { statusEl.textContent = `Добавляем ${ids.length}…`; statusEl.className = "form-msg"; }
+      const resp = await fetch("/api/watch/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ typeIds: ids, locationId: hub.locationId, regionId: hub.regionId, note: "" })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        if (statusEl) { statusEl.textContent = err.error || "не добавилось"; statusEl.className = "form-msg err"; }
+        return;
+      }
+      boxes.forEach(b => { b.checked = true; b.disabled = true; b.title = "Уже в слежении"; });
+      if (statusEl) { statusEl.textContent = `В слежении: +${ids.length} (Jita 4-4)`; statusEl.className = "form-msg"; }
+      else {
+        const rates = document.getElementById("rates");
+        if (rates) rates.textContent = (rates.textContent || "") + ` · в слежение +${ids.length}`;
       }
     }
     const colHint = {
       name: "Название. Ссылка открывает карточку предмета на EveTycoon.",
-      bestBuy: "Самая высокая цена, по которой в Jita 4-4 прямо сейчас готовы купить одну штуку.",
-      bestSell: "Самая низкая цена, по которой в Jita 4-4 прямо сейчас продают одну штуку.",
+      bestBuy: "Самая высокая цена покупки на выбранных рынках закупа (Jita и/или Perimeter).",
+      bestSell: "Самая низкая цена продажи на выбранных рынках закупа.",
       marginIsk: "Сколько ISK останется с одной штуки, если купить и сразу продать. Налог и брокерская уже вычтены.",
       marginFrac: "Та же маржа в процентах от денег, которые уйдут на покупку.",
       dailyVolume: "Медиана объёма ESI The Forge за до 7 полных дней (не один шумный день).",
@@ -888,6 +1274,16 @@
       buyMoves: "Сколько последних часов подряд менялась лучшая цена покупки. Чем больше, тем чаще придётся переставлять свой ордер.",
       sellMoves: "Сколько последних часов подряд менялась лучшая цена продажи.",
       marginThen: "Маржа с одной штуки три часа назад, до начала падения. Сравни с текущей маржей.",
+      netMarginIsk: "Маржа с штуки минус типичная плата за перестановки (по числу сдвигов цены).",
+      anomaly: "Подозрительная строка: стена стакана или цена далеко от недавней истории. Смотрите осторожнее.",
+      relists: "Сколько раз можно опустить продажу, пока маржа не кончится. Advanced Broker Relations 0: плата 50% брокерской от цены продажи. Минимум 100 ISK за приказ в это число не входит.",
+      buyVolume: "Объём и ордера в пределах 1% от лучшей цены покупки.",
+      buyTouch: "Штук ровно по лучшей цене покупки. Прочерк — этот снимок ещё без отдельного счёта.",
+      sellVolume: "Объём и ордера в пределах 1% от лучшей цены продажи.",
+      sellTouch: "Штук ровно по лучшей цене продажи. Прочерк — этот снимок ещё без отдельного счёта.",
+      capital: "Покупка × меньшая из двух полос 1%. Столько ISK заморозить, чтобы занять обе стороны.",
+      days: "Объём обеих полос делить на суточный объём дня.",
+      dailyRoi: "Оценка за сутки делить на капитал.",
       fromName: "Станция или структура, где покупаете чужой sell.",
       toName: "Куда везёте: здесь либо сразу продаёте в скупку, либо выставляете свой sell.",
       ask: "Цена чужого sell на старте. Столько платите за одну штуку.",
@@ -896,11 +1292,42 @@
       listMarginIsk: "Маржа с штуки, если купили по «Покупка» и выставили sell по «Выставить». Налог и брокерская с продажи уже внутри.",
       listMarginFrac: "Та же маржа выставления в процентах от цены покупки.",
       units: "Сколько штук проходит по глубине ордеров на обеих сторонах.",
-      dailyVolume: "Сколько штук продали за последний полный день ESI по The Forge, не только на этих станциях.",
       jumps: "Прыжков по кратчайшему маршруту между системами.",
       volumeM3: "Упакованный объём одной штуки в м³.",
-      cargoM3: "Объём всего объёма сделки: м³ за штуку × штуки."
+      cargoM3: "Объём всей сделки: м³ за штуку × штуки.",
+      location: "Jita или Perimeter — где взята вилка.",
+      buy: "Лучшая цена покупки сейчас.",
+      sell: "Лучшая цена продажи сейчас.",
+      buy_post: "Рекомендуемая постановка buy: лучшая + 1 шаг цены (4 значащие цифры).",
+      sell_post: "Рекомендуемая постановка sell: лучшая − 1 шаг цены.",
+      margin: "Маржа с одной штуки после комиссий.",
+      margin_pct: "Маржа в процентах от покупки.",
+      qty: "Партия на горизонт (штук).",
+      capital: "Штук × цена покупки (полный эскроу, без Margin Trading).",
+      volume_day: "Суточный объём (медиана 7д).",
+      competitors: "Ордеров в полосе 1% — большая из сторон.",
+      share_pct: "Какую часть объёма реально забрать.",
+      relists_day: "Ожидаемые перестановки на сторону в сутки.",
+      profit_day: "Маржа × наши штуки/сутки − стоимость перестановок.",
+      roi_day_pct: "Прибыль/сутки ÷ капитал, %.",
+      turnover_days: "Штук ÷ наши штуки/сутки.",
+      act: "Исключить предмет из портфеля.",
+      watchLoc: "Станция, по которой опрашиваются ордера типа.",
+      watchType: "type_id предмета в ESI.",
+      watchNote: "Ваша заметка к позиции в списке слежения.",
+      watchAct: "Убрать тип из слежения.",
+      cContract: "Публичный item_exchange контракт в The Forge.",
+      cItem: "Предмет и количество из контракта.",
+      cPrice: "Цена контракта (что платите).",
+      cMarket: "Лучший sell этого типа на доске закупа.",
+      cEdge: "Рыночная стоимость минус цена контракта."
     };
+    function applyColHints(root, hints) {
+      root.querySelectorAll("tr.cols th").forEach(th => {
+        const key = th.dataset.k;
+        if (key && hints[key]) th.title = hints[key];
+      });
+    }
     let sortKey = "dailyIsk";
     let sortDir = -1;
     let signalKind = "shout";
@@ -982,11 +1409,12 @@
     }
 
     function paintGrouped(input) {
-      if (!input.dataset.g) return;
+      if (!input.dataset.g && !input.classList.contains("isk-input")) return;
       const raw = input.value;
       const end = input.selectionStart ?? raw.length;
       const digitsBefore = raw.slice(0, end).replace(/\D/g, "").length;
       const compact = raw.replace(/[\s\u00a0\u202f]/g, "");
+      if (compact === "") { input.value = ""; return; }
       if (!/^\d+$/.test(compact)) return;
       const grouped = iskWhole.format(Number(compact));
       if (grouped === raw) return;
@@ -1000,6 +1428,13 @@
       input.setSelectionRange(pos, pos);
     }
 
+    function parseGrouped(text) {
+      const compact = String(text ?? "").trim().replace(/[\s\u00a0\u202f]/g, "").replace(",", ".");
+      if (!compact) return 0;
+      const n = Number(compact);
+      return Number.isFinite(n) ? n : 0;
+    }
+
     function filterText(input) {
       const value = input.value.trim();
       if (!input.dataset.g) return value;
@@ -1011,7 +1446,7 @@
       if (value == null || value === "") return "—";
       if (kind === "pct") return pct.format(value);
       if (kind === "num") return isk.format(value);
-      if (kind === "isk") return iskWhole.format(value);
+      if (kind === "isk") return isk.format(value);
       return String(value);
     }
 
@@ -1066,7 +1501,9 @@
           : "В этом снимке нет строк с плюсовой маржой.";
       for (const r of shown) {
         const tr = document.createElement("tr");
+        const watched = !!r.watched;
         tr.innerHTML =
+          `<td class="watch-pick"><input type="checkbox" class="watch-pick-cb" data-t="${r.typeId}" ${watched ? "checked disabled" : ""} title="${watched ? "Уже в слежении" : "Отметить"}"></td>` +
           `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
           `<td>${cell(r.bestBuy, "isk")}</td>` +
           `<td>${cell(r.bestSell, "isk")}</td>` +
@@ -1075,19 +1512,21 @@
           `<td title="${r.volumeDay || ""}">${cell(r.dailyVolume, "num")}</td>` +
           `<td>${cell(r.competitors, "num")}</td>` +
           `<td>${r.captureShare != null ? pct.format(r.captureShare) : "—"}</td>` +
-          `<td title="buy ${r.stationBuyFilled24h || 0} / sell ${r.stationSellFilled24h || 0}">${cell(r.stationVolume24h, "num")}</td>` +
+          `<td title="buy ${iskWhole.format(r.stationBuyFilled24h || 0)} / sell ${iskWhole.format(r.stationSellFilled24h || 0)}">${cell(r.stationVolume24h, "num")}</td>` +
           `<td>${cell(r.dailyIsk, "isk")}</td>` +
           `<td>${cell(r.hours, "num")}</td>` +
           `<td>${cell(r.relists, "num")}</td>` +
-          `<td>${cell(r.buyVolume, "num")} (${r.buyOrders})</td>` +
+          `<td>${cell(r.buyVolume, "num")} (${iskWhole.format(r.buyOrders)})</td>` +
           `<td>${cell(r.buyTouch, "num")}</td>` +
-          `<td>${cell(r.sellVolume, "num")} (${r.sellOrders})</td>` +
+          `<td>${cell(r.sellVolume, "num")} (${iskWhole.format(r.sellOrders)})</td>` +
           `<td>${cell(r.sellTouch, "num")}</td>` +
           `<td>${cell(r.capital, "isk")}</td>` +
           `<td>${cell(r.days, "num")}</td>` +
           `<td>${cell(r.dailyRoi, "pct")}</td>`;
         body.appendChild(tr);
       }
+      const all = document.getElementById("board-watch-all");
+      if (all) all.checked = false;
       applyColumns(document.getElementById("view-board"), hiddenBoard);
     }
 
@@ -1129,9 +1568,13 @@
       document.getElementById("sidebar").classList.remove("open");
       document.getElementById("backdrop").classList.remove("show");
       if (name === "signal") loadSignals().catch(() => {});
-      if (name === "haul") loadHaul().catch(() => {});
+      if (name === "haul") {
+        if (haulTab === "trip") loadHaulTrips().catch(() => {});
+        else loadHaul().catch(() => {});
+      }
       if (name === "watch") loadWatch().catch(() => {});
       if (name === "tools") loadNotes().catch(() => {});
+      if (name === "portfolio") loadPortfolio().catch(() => {});
     }
 
     async function loadWatch() {
@@ -1217,7 +1660,7 @@
           `<td>${cell(r.volumeM3, "num")}</td>`;
         body.appendChild(tr);
       }
-      applyColumns(document.getElementById("view-haul"), hiddenHaul);
+      applyColumns(document.getElementById("haul-board-pane"), hiddenHaul);
     }
 
     async function loadSignals() {
@@ -1295,7 +1738,7 @@
         const th = document.createElement("th");
         th.dataset.k = key;
         th.textContent = title;
-        if (colHint[key]) th.title = colHint[key];
+        th.title = colHint[key] || title;
         if (kind === "text") th.classList.add("left");
         if (key === signalSort) {
           th.classList.add("sorted");
@@ -1352,6 +1795,11 @@
         document.getElementById("faction").value = s.factionStanding;
         document.getElementById("corp").value = s.corpStanding;
         document.getElementById("keep-days").value = s.keepDays;
+        document.getElementById("filter-cosmetics").checked = s.filterCosmetics !== false;
+        document.getElementById("filter-special").checked = s.filterSpecialEdition !== false;
+        document.getElementById("filter-blueprints").checked = s.filterBlueprints !== false;
+        document.getElementById("min-sell").value = iskWhole.format(s.minSellPrice ?? 1000000);
+        document.getElementById("min-haul").value = iskWhole.format(s.minHaulSellPrice ?? 500000);
         document.getElementById("db-size").textContent = "Сейчас на диске: " + bytes(s.databaseBytes);
         settingsReady = true;
       }
@@ -1368,9 +1816,10 @@
       document.querySelector(".nav-item.active").dataset.view
     ));
     document.querySelectorAll("#view-board tr.cols th").forEach(th => {
-      th.addEventListener("click", () => {
+      th.addEventListener("click", event => {
+        if (event.target.closest("input")) return;
         const key = th.dataset.k;
-        if (!key) return;
+        if (!key || key === "watchPick") return;
         if (sortKey === key) sortDir *= -1;
         else { sortKey = key; sortDir = key === "name" ? 1 : -1; }
         page = 1;
@@ -1442,7 +1891,12 @@
         brokerRelations: Number(document.getElementById("broker").value),
         factionStanding: Number(document.getElementById("faction").value),
         corpStanding: Number(document.getElementById("corp").value),
-        keepDays: Number(document.getElementById("keep-days").value)
+        keepDays: Number(document.getElementById("keep-days").value),
+        filterCosmetics: document.getElementById("filter-cosmetics").checked,
+        filterSpecialEdition: document.getElementById("filter-special").checked,
+        filterBlueprints: document.getElementById("filter-blueprints").checked,
+        minSellPrice: parseGrouped(document.getElementById("min-sell").value),
+        minHaulSellPrice: parseGrouped(document.getElementById("min-haul").value)
       };
       const resp = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!resp.ok) {
@@ -1540,18 +1994,46 @@
       marginIsk: "Маржа с штуки при мгновенной продаже в скупку на месте назначения. Налог вычтен, брокерской нет.",
       marginFrac: "Мгновенная маржа в процентах от цены покупки.",
       dailyVolume: "Объём за последний полный день ESI по региону конечной станции. Jita/Perimeter — The Forge; Amarr — Domain и т.д.",
-      dailyIsk: "Мгновенная маржа с штуки × сколько штук проходит по ордерам."
+      dailyIsk: "Мгновенная маржа с штуки × сколько штук проходит по ордерам.",
+      // Рейс — список пар
+      route: "Пара хабов A→B. Клик — сортировка.",
+      jumps: "Число прыжков ESI (хайсек или кратчайший — как в фильтре). Клик — сортировка.",
+      min_sec: "Минимальный security_status на пути (0.5+ в игре = хайсек). Клик — сортировка.",
+      gank: "Ганк-системы на маршруте; красный, если груз выше порога. Клик — сортировка.",
+      items: "Сколько разных предметов в корзине. Клик — сортировка.",
+      fill_pct: "Заполнение трюма, % от заданных м³. Клик — сортировка.",
+      cost: "Сумма закупки на A (= стоимость груза для ганка). Клик — сортировка.",
+      profit: "Прибыль после налога (и брокерской в режиме «выставить»). Клик — сортировка.",
+      roi_pct: "Прибыль / стоимость закупки × 100. Клик — сортировка.",
+      isk_per_jump: "Прибыль / прыжки. Клик — сортировка.",
+      isk_per_hour: "Прибыль / (прыжки × сек/прыжок). Клик — сортировка.",
+      days_to_sell: "Дней до распродажи list-позиций: max qty/(объём×доля). Не больше горизонта. Instant → 0. Клик — сортировка.",
+      profit_courier: "Прибыль минус тариф курьерки. Скрыто, если тарифы 0. Клик — сортировка.",
+      // Рейс — корзина
+      name: "Название предмета. Клик — сортировка.",
+      mode: "instant = в чужой buy на B; list = свой sell на B. Клик — сортировка.",
+      qty: "Штук в корзине. Клик — сортировка.",
+      m3: "Суммарный упакованный объём позиции. Клик — сортировка.",
+      buy_avg: "Средняя цена закупки на A. Клик — сортировка.",
+      buy_max: "Самая дорогая цена покупки на A в этой позиции. Клик — сортировка.",
+      sell_avg: "Средняя цена продажи на B (buy или sell_post). Клик — сортировка.",
+      sell_min: "Нижняя цена продажи на B в этой позиции. Клик — сортировка.",
+      profit_pct: "Прибыль / стоимость × 100. Клик — сортировка.",
+      volume_day_B: "Медиана объёма/сутки в регионе B (для list). Клик — сортировка.",
+      ask_age_days: "Возраст лучшего sell на B (issued ESI), суток. Старше 7 — не якорь для list. Клик — сортировка."
     };
-    document.querySelectorAll("#view-haul tr.cols th").forEach(th => {
-      if (haulHint[th.dataset.k]) th.title = haulHint[th.dataset.k];
-    });
+    applyColHints(document.getElementById("view-board"), colHint);
+    applyColHints(document.getElementById("view-haul"), haulHint);
+    applyColHints(document.getElementById("view-portfolio"), colHint);
+    applyColHints(document.getElementById("view-watch"), colHint);
+    applyColHints(document.getElementById("view-tools"), colHint);
     fillColMenu(
       document.getElementById("haul-cols-menu"),
-      document.querySelectorAll("#view-haul tr.cols th"),
+      document.querySelectorAll("#haul-table tr.cols th"),
       hiddenHaul,
       () => {
         writeHidden("jita-cols-haul", hiddenHaul);
-        applyColumns(document.getElementById("view-haul"), hiddenHaul);
+        applyColumns(document.getElementById("haul-board-pane"), hiddenHaul);
         haulPage = 1;
         loadHaul().catch(() => {});
       }
@@ -1636,61 +2118,570 @@
       }
     }
 
-    document.getElementById("portfolio-run").addEventListener("click", async () => {
+    const hiddenPortfolio = readHidden("jita-cols-portfolio");
+    let pfTimer = 0;
+    let lastPortfolio = null;
+    let pfSort = "profit_day";
+    let pfDir = -1;
+
+    function parseIskFlexible(text) {
+      let s = String(text || "").trim().toLowerCase().replace(/[\s\u00a0\u202f]/g, "").replace(",", ".");
+      let mul = 1;
+      if (s.endsWith("b") || s.endsWith("б")) { mul = 1e9; s = s.slice(0, -1); }
+      else if (s.endsWith("m") || s.endsWith("м")) { mul = 1e6; s = s.slice(0, -1); }
+      else if (s.endsWith("k") || s.endsWith("к")) { mul = 1e3; s = s.slice(0, -1); }
+      const n = Number(s);
+      return Number.isFinite(n) ? Math.round(n * mul) : 0;
+    }
+
+    function pfSlotsModeUi() {
+      const skills = document.getElementById("pf-slots-mode").value === "skills";
+      document.getElementById("pf-slots-wrap").hidden = skills;
+      document.querySelectorAll(".pf-skill").forEach(el => { el.hidden = !skills; });
+      if (skills) {
+        const t = 5
+          + 4 * (Number(document.getElementById("pf-trade").value) || 0)
+          + 8 * (Number(document.getElementById("pf-retail").value) || 0)
+          + 16 * (Number(document.getElementById("pf-wholesale").value) || 0)
+          + 32 * (Number(document.getElementById("pf-tycoon").value) || 0);
+        const used = Number(document.getElementById("pf-slots-used").value) || 0;
+        document.getElementById("pf-slots-total").textContent = `${Math.max(0, t - used)} своб. / ${t}`;
+      }
+    }
+
+    function portfolioQuery() {
+      const p = new URLSearchParams({
+        capital: String(parseIskFlexible(document.getElementById("pf-capital").value)),
+        slotsMode: document.getElementById("pf-slots-mode").value,
+        slots: document.getElementById("pf-slots").value || "0",
+        skillTrade: document.getElementById("pf-trade").value || "0",
+        skillRetail: document.getElementById("pf-retail").value || "0",
+        skillWholesale: document.getElementById("pf-wholesale").value || "0",
+        skillTycoon: document.getElementById("pf-tycoon").value || "0",
+        slotsUsed: document.getElementById("pf-slots-used").value || "0",
+        horizonDays: document.getElementById("pf-horizon").value || "2",
+        maxShareItem: String((Number(document.getElementById("pf-max-share").value) || 20) / 100),
+        minProfitDay: String(parseIskFlexible(document.getElementById("pf-min-profit").value)),
+        minHours: document.getElementById("pf-min-hours").value || "6",
+        jita: document.getElementById("pf-src-jita").checked ? "true" : "false",
+        perimeter: document.getElementById("pf-src-perimeter").checked ? "true" : "false"
+      });
+      return p;
+    }
+
+    async function savePortfolioSettings() {
+      const body = {
+        capital: parseIskFlexible(document.getElementById("pf-capital").value),
+        slotsMode: document.getElementById("pf-slots-mode").value,
+        slots: Number(document.getElementById("pf-slots").value) || 0,
+        skillTrade: Number(document.getElementById("pf-trade").value) || 0,
+        skillRetail: Number(document.getElementById("pf-retail").value) || 0,
+        skillWholesale: Number(document.getElementById("pf-wholesale").value) || 0,
+        skillTycoon: Number(document.getElementById("pf-tycoon").value) || 0,
+        slotsUsed: Number(document.getElementById("pf-slots-used").value) || 0,
+        horizonDays: Number(document.getElementById("pf-horizon").value) || 2,
+        maxShareItem: (Number(document.getElementById("pf-max-share").value) || 20) / 100,
+        maxMarketShare: 0.3,
+        minProfitDay: parseIskFlexible(document.getElementById("pf-min-profit").value),
+        minHours: Number(document.getElementById("pf-min-hours").value) || 0,
+        maxRelistsDay: 12,
+        sourceJita: document.getElementById("pf-src-jita").checked,
+        sourcePerimeter: document.getElementById("pf-src-perimeter").checked,
+        exclude: lastPortfolio?.settings?.exclude || []
+      };
+      await fetch("/api/portfolio/settings", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+      });
+    }
+
+    async function loadPortfolio() {
       const msg = document.getElementById("pf-msg");
       msg.textContent = "Считаем…";
+      pfSlotsModeUi();
+      await savePortfolioSettings().catch(() => {});
+      const dto = await fetch("/api/portfolio?" + portfolioQuery()).then(r => r.json());
+      if (dto.error) {
+        msg.textContent = dto.error;
+        msg.className = "form-msg err";
+        return;
+      }
+      lastPortfolio = dto;
+      msg.textContent = "";
+      msg.className = "form-msg";
+      const t = dto.totals || {};
+      const inp = dto.inputs || {};
+      document.getElementById("pf-totals").textContent =
+        `${t.positions || 0} позиций · ${t.slots_used || 0}/${inp.slots || 0} слотов · ` +
+        `${isk.format(t.capital_used)} / ${isk.format(inp.capital)} · ` +
+        `${isk.format(t.profit_day)}/сутки · ${isk.format(t.roi_day_pct)}%/сутки · оборот ${isk.format(t.avg_turnover_days)} дн`;
+      const rj = dto.rejected_count || {};
+      document.getElementById("pf-rejected").textContent =
+        `Отсеяно: нет маржи ${rj.no_margin || 0}, мало часов ${rj.low_hours || 0}, ниже порога ${rj.low_profit || 0}, исключено ${rj.excluded || 0}, дубль Jita/Perimeter ${rj.dedup || 0}`;
+      const ex = (dto.settings && dto.settings.exclude) || [];
+      document.getElementById("portfolio-excluded-btn").textContent = `Исключённые (${ex.length})`;
+      renderPortfolioRows();
+    }
+
+    function renderPortfolioRows() {
+      const body = document.getElementById("pf-body");
+      body.replaceChildren();
+      const rows = [...(lastPortfolio?.rows || [])];
+      document.getElementById("pf-empty").hidden = rows.length > 0;
+      const textKeys = new Set(["name", "location"]);
+      rows.sort((a, b) => {
+        const av = a[pfSort];
+        const bv = b[pfSort];
+        let cmp = 0;
+        if (textKeys.has(pfSort))
+          cmp = String(av || "").localeCompare(String(bv || ""), "ru", { sensitivity: "base" });
+        else {
+          const an = av == null || av === "" ? null : Number(av);
+          const bn = bv == null || bv === "" ? null : Number(bv);
+          if (an == null && bn == null) cmp = 0;
+          else if (an == null) cmp = 1;
+          else if (bn == null) cmp = -1;
+          else cmp = an === bn ? 0 : an < bn ? -1 : 1;
+        }
+        if (cmp === 0)
+          cmp = (a.type_id || 0) - (b.type_id || 0);
+        return pfDir < 0 ? -cmp : cmp;
+      });
+      document.querySelectorAll("#portfolio-table tr.cols th").forEach(th => {
+        const on = th.dataset.k === pfSort;
+        th.classList.toggle("sorted", on);
+        th.classList.toggle("asc", on && pfDir > 0);
+      });
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        const mark = r.partial ? ` <span title="урезана по капиталу">✂</span>` : "";
+        tr.innerHTML =
+          `<td class="watch-pick"><input type="checkbox" class="watch-pick-cb" data-t="${r.type_id}" title="Отметить"></td>` +
+          `<td class="left"><a href="https://evetycoon.com/market/${r.type_id}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>${mark}</td>` +
+          `<td class="left">${escapeHtml(r.location || "")}</td>` +
+          `<td>${isk.format(r.buy)}</td><td>${isk.format(r.sell)}</td>` +
+          `<td>${isk.format(r.buy_post)}</td><td>${isk.format(r.sell_post)}</td>` +
+          `<td>${isk.format(r.margin)}</td><td>${isk.format(r.margin_pct)}</td>` +
+          `<td>${iskWhole.format(r.qty)}</td><td>${isk.format(r.capital)}</td>` +
+          `<td>${iskWhole.format(r.volume_day)}</td><td>${iskWhole.format(r.competitors)}</td>` +
+          `<td>${isk.format(r.share_pct)}</td><td>${isk.format(r.relists_day)}</td>` +
+          `<td>${isk.format(r.profit_day)}</td><td>${isk.format(r.roi_day_pct)}</td>` +
+          `<td>${isk.format(r.turnover_days)}</td><td>${iskWhole.format(r.hours)}</td>` +
+          `<td><button type="button" class="btn btn-secondary pf-x" data-t="${r.type_id}">✕</button></td>`;
+        body.appendChild(tr);
+      }
+      const all = document.getElementById("pf-watch-all");
+      if (all) all.checked = false;
+      applyColumns(document.getElementById("view-portfolio"), hiddenPortfolio);
+      applyColHints(document.getElementById("view-portfolio"), colHint);
+    }
+
+    document.getElementById("portfolio-table").addEventListener("click", event => {
+      if (event.target.closest("input")) return;
+      const th = event.target.closest("tr.cols th");
+      if (!th || !th.dataset.k || th.dataset.k === "act" || th.dataset.k === "watchPick") return;
+      const key = th.dataset.k;
+      if (pfSort === key) pfDir *= -1;
+      else { pfSort = key; pfDir = key === "name" || key === "location" ? 1 : -1; }
+      if (lastPortfolio) renderPortfolioRows();
+    });
+    document.getElementById("board-watch-add").addEventListener("click", () => {
+      addCheckedToWatch("#view-board", null).catch(() => {});
+    });
+    document.getElementById("board-watch-all").addEventListener("change", event => {
+      const on = event.target.checked;
+      document.querySelectorAll("#view-board .watch-pick-cb:not(:disabled)").forEach(cb => { cb.checked = on; });
+    });
+    document.getElementById("portfolio-watch-add").addEventListener("click", () => {
+      addCheckedToWatch("#view-portfolio", document.getElementById("pf-msg")).catch(() => {});
+    });
+    document.getElementById("pf-watch-all").addEventListener("change", event => {
+      const on = event.target.checked;
+      document.querySelectorAll("#view-portfolio .watch-pick-cb:not(:disabled)").forEach(cb => { cb.checked = on; });
+    });
+    document.getElementById("portfolio-run").addEventListener("click", () => loadPortfolio().catch(() => {}));
+    document.getElementById("pf-slots-mode").addEventListener("change", () => { pfSlotsModeUi(); schedulePortfolio(); });
+    document.querySelectorAll("#view-portfolio input, #view-portfolio select").forEach(el => {
+      el.addEventListener("input", () => {
+        if (el.classList.contains("isk-input") || el.dataset.g) paintGrouped(el);
+        pfSlotsModeUi();
+        schedulePortfolio();
+      });
+      el.addEventListener("change", () => schedulePortfolio());
+    });
+    function schedulePortfolio() {
+      clearTimeout(pfTimer);
+      pfTimer = setTimeout(() => loadPortfolio().catch(() => {}), 400);
+    }
+    document.getElementById("portfolio-copy").addEventListener("click", () => {
+      const names = (lastPortfolio?.rows || []).map(r => r.name).join("\n");
+      if (names) navigator.clipboard.writeText(names);
+    });
+    document.getElementById("portfolio-excluded-btn").addEventListener("click", async () => {
+      const ex = lastPortfolio?.settings?.exclude || [];
+      if (!ex.length) { alert("Список пуст"); return; }
+      const id = Number(prompt("Вернуть typeId из: " + ex.join(", "), String(ex[0])));
+      if (!id) return;
+      await fetch("/api/portfolio/exclude", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ typeId: id, excluded: false })
+      });
+      await loadPortfolio();
+    });
+    document.getElementById("pf-body").addEventListener("click", async event => {
+      const btn = event.target.closest(".pf-x");
+      if (!btn) return;
+      await fetch("/api/portfolio/exclude", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ typeId: Number(btn.dataset.t), excluded: true })
+      });
+      await loadPortfolio();
+    });
+    fillColMenu(
+      document.getElementById("portfolio-cols-menu"),
+      document.querySelectorAll("#view-portfolio tr.cols th"),
+      hiddenPortfolio,
+      () => {
+        writeHidden("jita-cols-portfolio", hiddenPortfolio);
+        applyColumns(document.getElementById("view-portfolio"), hiddenPortfolio);
+      }
+    );
+    applyColHints(document.getElementById("view-portfolio"), colHint);
+    pfSlotsModeUi();
+
+    function haulQuery() {
+      const p = new URLSearchParams({
+        from: document.getElementById("hl-from").value,
+        to: document.getElementById("hl-to").value,
+        shipPreset: document.getElementById("hl-ship").value,
+        cargoM3: String(parseGrouped(document.getElementById("hl-cargo").value) || 0),
+        budget: String(parseGrouped(document.getElementById("hl-budget").value) || 0),
+        maxCargoValue: String(parseGrouped(document.getElementById("hl-max-cargo").value) || 0),
+        mode: document.getElementById("hl-mode").value,
+        routeFlag: document.getElementById("hl-route").value,
+        listHorizonDays: document.getElementById("hl-horizon").value || "3",
+        secPerJump: document.getElementById("hl-sec").value || "60",
+        minItemProfit: String(parseGrouped(document.getElementById("hl-min-profit").value) || 0)
+      });
+      return p;
+    }
+
+    function hlHorizonUi() {
+      const mode = document.getElementById("hl-mode").value;
+      document.getElementById("hl-horizon-wrap").hidden = mode === "instant";
+      const hint = document.getElementById("hl-mode-hint");
+      if (!hint) return;
+      if (mode === "instant")
+        hint.textContent = "Режим «в скупку»: купить sell на A, сразу продать в buy на B. Клик по заголовку — сортировка.";
+      else if (mode === "list")
+        hint.textContent = "Режим «выставить»: min(ask−tick, история, мин. sell соседних хабов); старый ask — только история. Клик по заголовку — сортировка.";
+      else
+        hint.textContent = "Режим «лучшее»: в скупку или выставить. List режет мёртвые ask возрастом, историей и ценой соседей. Клик по заголовку — сортировка.";
+    }
+
+    async function saveHaulSettings() {
       const body = {
-        capital: Number(document.getElementById("pf-capital").value) || 0,
-        trade: Number(document.getElementById("pf-trade").value) || 0,
-        retail: Number(document.getElementById("pf-retail").value) || 0,
-        wholesale: Number(document.getElementById("pf-wholesale").value) || 0,
-        tycoon: Number(document.getElementById("pf-tycoon").value) || 0,
-        marginTrading: Number(document.getElementById("pf-margin").value) || 0
+        from: document.getElementById("hl-from").value,
+        to: document.getElementById("hl-to").value,
+        shipPreset: document.getElementById("hl-ship").value,
+        cargoM3: parseGrouped(document.getElementById("hl-cargo").value),
+        budget: parseGrouped(document.getElementById("hl-budget").value),
+        maxCargoValue: parseGrouped(document.getElementById("hl-max-cargo").value),
+        mode: document.getElementById("hl-mode").value,
+        routeFlag: document.getElementById("hl-route").value,
+        listHorizonDays: Number(document.getElementById("hl-horizon").value) || 3,
+        maxMarketShare: 0.3,
+        minItemProfit: parseGrouped(document.getElementById("hl-min-profit").value),
+        secPerJump: Number(document.getElementById("hl-sec").value) || 60,
+        gankSystems: "Uedama, Sivala, Ahbazon",
+        gankWarnValue: 1000000000,
+        minUnitPrice: 500000,
+        courierBase: parseGrouped(document.getElementById("hl-c-base").value),
+        courierPerM3: parseGrouped(document.getElementById("hl-c-m3").value),
+        courierPerJump: parseGrouped(document.getElementById("hl-c-jump").value),
+        courierCollateralPct: Number(document.getElementById("hl-c-pct").value) || 0,
+        courierMaxM3: 0,
+        listMaxAskAgeDays: Number(document.getElementById("hl-ask-age").value) || 0,
+        listHistDays: Number(document.getElementById("hl-hist-days").value) || 14
       };
-      const dto = await fetch("/api/portfolio", {
+      await fetch("/api/haul/settings", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-      }).then(r => r.json());
-      msg.textContent = `Слоты ${dto.slotsUsed}/${dto.slots} · эскроу ${iskWhole.format(dto.escrowUsed)} · оценка/сутки ~${iskWhole.format(dto.dailyIskTotal)}`;
-      const tbody = document.getElementById("pf-body");
-      tbody.innerHTML = "";
-      document.getElementById("pf-empty").hidden = (dto.picks || []).length > 0;
-      for (const p of dto.picks || []) {
+      });
+    }
+
+    function setTripsListVisible(show) {
+      document.getElementById("hl-trips-wrap").hidden = !show;
+      const picked = document.getElementById("hl-picked-bar");
+      const trip = lastTripDetail?.trip;
+      if (!show && trip) {
+        picked.hidden = false;
+        document.getElementById("hl-picked-label").textContent =
+          `${trip.from} → ${trip.to} · прибыль ${isk.format(trip.profit)} · груз ${isk.format(trip.cost)}`;
+      } else {
+        picked.hidden = true;
+      }
+    }
+
+    function renderTripsRows() {
+      const body = document.getElementById("hl-trips-body");
+      body.replaceChildren();
+      const trips = [...(lastTrips?.trips || [])];
+      const showCourier = trips.some(t => t.courier_cost > 0 || t.profit_courier != null);
+      document.getElementById("hl-col-courier").hidden = !showCourier;
+      document.getElementById("hl-trips-empty").hidden = trips.length > 0;
+      const textKeys = new Set(["route", "gank"]);
+      trips.sort((a, b) => {
+        let av; let bv;
+        if (tripsSort === "route") {
+          av = `${a.from}→${a.to}`;
+          bv = `${b.from}→${b.to}`;
+        } else if (tripsSort === "gank") {
+          av = (a.gank_hits || []).join(",");
+          bv = (b.gank_hits || []).join(",");
+        } else {
+          av = a[tripsSort];
+          bv = b[tripsSort];
+        }
+        let cmp = 0;
+        if (textKeys.has(tripsSort))
+          cmp = String(av || "").localeCompare(String(bv || ""), "ru", { sensitivity: "base" });
+        else if (av == null && bv == null) cmp = 0;
+        else if (av == null) cmp = 1;
+        else if (bv == null) cmp = -1;
+        else cmp = (Number(av) || 0) - (Number(bv) || 0);
+        return cmp * tripsDir
+          || String(a.from).localeCompare(b.from)
+          || String(a.to).localeCompare(b.to);
+      });
+      document.querySelectorAll("#hl-trips-table tr.cols th").forEach(th => {
+        const on = th.dataset.k === tripsSort;
+        th.classList.toggle("sorted", on);
+        th.classList.toggle("asc", on && tripsDir > 0);
+      });
+      const keepFrom = lastTripDetail?.trip?.from;
+      const keepTo = lastTripDetail?.trip?.to;
+      for (const t of trips) {
+        const tr = document.createElement("tr");
+        tr.className = "trip-row";
+        tr.dataset.from = t.from;
+        tr.dataset.to = t.to;
+        if (keepFrom === t.from && keepTo === t.to) tr.classList.add("active");
+        const gank = (t.gank_hits || []).join(", ") || "—";
+        const marks = [];
+        if (t.no_secure_path) marks.push('<span class="gank-hot">нет хайсек-пути</span>');
+        if (t.lowsec_jumps > 0) marks.push(`лоусек ${t.lowsec_jumps}`);
+        tr.innerHTML =
+          `<td class="left">${escapeHtml(t.from)} → ${escapeHtml(t.to)}${marks.length ? "<br>" + marks.join(" · ") : ""}</td>` +
+          `<td>${iskWhole.format(t.jumps)}</td>` +
+          `<td>${Number(t.min_sec).toFixed(1)}</td>` +
+          `<td class="${t.gank_warning ? "gank-hot" : ""}">${escapeHtml(gank)}</td>` +
+          `<td>${iskWhole.format(t.items)}</td>` +
+          `<td>${isk.format(t.fill_pct)}</td>` +
+          `<td>${isk.format(t.cost)}</td>` +
+          `<td>${isk.format(t.profit)}</td>` +
+          `<td>${isk.format(t.roi_pct)}</td>` +
+          `<td>${isk.format(t.isk_per_jump)}</td>` +
+          `<td>${isk.format(t.isk_per_hour)}</td>` +
+          `<td>${t.days_to_sell > 0 ? Number(t.days_to_sell).toFixed(1) : "—"}</td>` +
+          `<td ${showCourier ? "" : "hidden"}>${t.profit_courier != null ? isk.format(t.profit_courier) : "—"}</td>`;
+        body.appendChild(tr);
+      }
+      // Столбцы рейса не из меню «Доски» — убрать случайный col-off от старого applyColumns.
+      document.querySelectorAll("#hl-trips-table th.col-off, #hl-trips-table td.col-off").forEach(el => {
+        el.classList.remove("col-off");
+      });
+    }
+
+    async function loadHaulTrips() {
+      const msg = document.getElementById("hl-msg");
+      msg.textContent = "Считаем рейсы…";
+      msg.className = "form-msg";
+      await saveHaulSettings().catch(() => {});
+      const dto = await fetch("/api/haul/trips?" + haulQuery()).then(r => r.json());
+      lastTrips = dto;
+      const warn = document.getElementById("haul-fresh-warn");
+      if ((dto.snapshot_age_min || 0) > 15) {
+        warn.hidden = false;
+        warn.innerHTML = `Снимку ${dto.snapshot_age_min} мин. Перед вылетом нажмите «Снять сейчас», стакан мог уйти. <button type="button" class="btn btn-secondary" id="hl-collect">Снять сейчас</button>`;
+        document.getElementById("hl-collect")?.addEventListener("click", () => document.getElementById("collect").click());
+      } else warn.hidden = true;
+      const trips = dto.trips || [];
+      const keepFrom = lastTripDetail?.trip?.from;
+      const keepTo = lastTripDetail?.trip?.to;
+      const stillThere = keepFrom && keepTo && trips.some(t => t.from === keepFrom && t.to === keepTo);
+      if (!stillThere) {
+        document.getElementById("hl-basket").hidden = true;
+        lastTripDetail = null;
+        lastBasketRows = [];
+        setTripsListVisible(true);
+      }
+      renderTripsRows();
+      if (stillThere && document.getElementById("hl-basket-body").children.length > 0) {
+        document.getElementById("hl-basket").hidden = false;
+        setTripsListVisible(false);
+      }
+      msg.textContent = trips.length ? `Рейсов: ${trips.length}` : "Пусто";
+    }
+
+    function renderBasketRows() {
+      const tbody = document.getElementById("hl-basket-body");
+      tbody.replaceChildren();
+      const textKeys = new Set(["name", "mode"]);
+      const rows = [...lastBasketRows].sort((a, b) => {
+        const av = a[basketSort];
+        const bv = b[basketSort];
+        let cmp = 0;
+        if (textKeys.has(basketSort))
+          cmp = String(av || "").localeCompare(String(bv || ""), "ru", { sensitivity: "base" });
+        else
+          cmp = (Number(av) || 0) - (Number(bv) || 0);
+        return cmp * basketDir || (a.type_id - b.type_id);
+      });
+      document.querySelectorAll("#hl-basket-table tr.cols th").forEach(th => {
+        const on = th.dataset.k === basketSort;
+        th.classList.toggle("sorted", on);
+        th.classList.toggle("asc", on && basketDir > 0);
+      });
+      for (const r of rows) {
         const tr = document.createElement("tr");
         tr.innerHTML =
-          `<td class="left"><a href="https://evetycoon.com/market/${p.typeId}" target="_blank" rel="noopener">${escapeHtml(p.name)}</a></td>` +
-          `<td>${isk.format(p.units)}</td><td>${iskWhole.format(p.escrow)}</td>` +
-          `<td>${iskWhole.format(p.dailyIsk)}</td><td>${p.slotsUsed}</td>`;
+          `<td class="left"><a href="https://evetycoon.com/market/${r.type_id}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
+          `<td>${escapeHtml(r.mode)}</td>` +
+          `<td>${iskWhole.format(r.qty)}</td>` +
+          `<td>${isk.format(r.m3)}</td>` +
+          `<td>${isk.format(r.buy_avg)}</td>` +
+          `<td>${isk.format(r.buy_max)}</td>` +
+          `<td>${isk.format(r.cost)}</td>` +
+          `<td>${isk.format(r.sell_avg)}</td>` +
+          `<td>${isk.format(r.sell_min)}</td>` +
+          `<td>${isk.format(r.profit)}</td>` +
+          `<td>${isk.format(r.profit_pct)}</td>` +
+          `<td>${iskWhole.format(r.volume_day_B)}</td>` +
+          `<td>${r.days_to_sell > 0 ? Number(r.days_to_sell).toFixed(1) : "—"}</td>` +
+          `<td>${r.ask_age_days != null ? Number(r.ask_age_days).toFixed(1) : "—"}</td>`;
         tbody.appendChild(tr);
       }
-    });
+    }
 
-    document.getElementById("haul-pack-run").addEventListener("click", async () => {
-      const msg = document.getElementById("pack-msg");
-      msg.textContent = "Собираем…";
-      const body = {
-        cargoM3: Number(document.getElementById("pack-cargo").value) || 0,
-        budget: Number(document.getElementById("pack-budget").value) || 0,
-        collateralBudget: Number(document.getElementById("pack-coll").value) || 0,
-        highSecOnly: document.getElementById("pack-secure").checked
-      };
-      lastPack = await fetch("/api/haul/pack", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-      }).then(r => r.json());
-      const lines = (lastPack.items || []).map(i =>
-        `${i.name}: ${i.units} шт · ${i.fromName}→${i.toName} · маржа ${iskWhole.format(i.marginIsk)} · RF ${iskWhole.format(i.redFrogIsk)} · ганк: ${(i.gankSystems || []).join(", ") || "—"}`);
-      const out = document.getElementById("pack-out");
-      out.hidden = false;
-      out.textContent = `м³ ${isk.format(lastPack.cargoUsed)} · бюджет ${iskWhole.format(lastPack.budgetUsed)} · маржа пачки ${iskWhole.format(lastPack.dailyMargin)}\n` + lines.join("\n");
-      msg.textContent = (lastPack.items || []).length ? "Готово" : "Пусто — нет связок под лимиты";
-      document.getElementById("pack-copy-mb").hidden = !lastPack.multibuy;
-      document.getElementById("pack-copy-csv").hidden = !lastPack.csv;
+    async function openHaulTrip(from, to) {
+      const msg = document.getElementById("hl-msg");
+      msg.textContent = `Корзина ${from} → ${to}…`;
+      const q = haulQuery();
+      q.set("from", from);
+      q.set("to", to);
+      const dto = await fetch("/api/haul/trip?" + q).then(r => r.json());
+      lastTripDetail = dto;
+      document.querySelectorAll("#hl-trips-body tr.trip-row").forEach(tr => {
+        tr.classList.toggle("active", tr.dataset.from === from && tr.dataset.to === to);
+      });
+      const basket = document.getElementById("hl-basket");
+      if (!dto.trip) {
+        lastBasketRows = [];
+        basket.hidden = true;
+        document.getElementById("hl-basket-body").replaceChildren();
+        msg.textContent = "Корзина пуста";
+        return;
+      }
+      document.getElementById("hl-basket-title").textContent =
+        `Корзина ${from} → ${to} · прибыль ${isk.format(dto.trip.profit)} · груз ${isk.format(dto.trip.cost)}`;
+      lastBasketRows = dto.trip.rows || [];
+      basketSort = "profit";
+      basketDir = -1;
+      renderBasketRows();
+      basket.hidden = false;
+      setTripsListVisible(false);
+      const scroll = document.getElementById("hl-basket-scroll");
+      if (scroll) scroll.scrollTop = 0;
+      msg.textContent = `Позиций: ${lastBasketRows.length}`;
+    }
+
+    document.querySelectorAll("[data-haul-tab]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        haulTab = btn.dataset.haulTab;
+        document.querySelectorAll("[data-haul-tab]").forEach(b => {
+          b.classList.toggle("btn-secondary", b.dataset.haulTab !== haulTab);
+        });
+        document.getElementById("haul-board-pane").hidden = haulTab !== "board";
+        document.getElementById("haul-trip-pane").hidden = haulTab !== "trip";
+        document.getElementById("haul-hint").textContent = haulTab === "trip"
+          ? "Планировщик рейса: корзина на один A→B под трюм и бюджет."
+          : "Купить чужой sell от 500 тыс., отвезти. Мгновенно — в чужой buy. Либо выставить свой sell на месте.";
+        if (haulTab === "trip") loadHaulTrips().catch(() => {});
+        else loadHaul().catch(() => {});
+      });
     });
-    document.getElementById("pack-copy-mb").addEventListener("click", () => {
-      if (lastPack?.multibuy) navigator.clipboard.writeText(lastPack.multibuy);
+    document.getElementById("hl-ship").addEventListener("change", () => {
+      const key = document.getElementById("hl-ship").value;
+      if (shipM3[key]) document.getElementById("hl-cargo").value = iskWhole.format(shipM3[key]);
     });
-    document.getElementById("pack-copy-csv").addEventListener("click", () => {
-      if (lastPack?.csv) navigator.clipboard.writeText(lastPack.csv);
+    document.getElementById("hl-mode").addEventListener("change", hlHorizonUi);
+    hlHorizonUi();
+    document.getElementById("hl-run").addEventListener("click", () => loadHaulTrips().catch(() => {}));
+    document.querySelectorAll("#haul-trip-pane input, #haul-trip-pane select").forEach(el => {
+      el.addEventListener("input", () => {
+        if (el.classList.contains("isk-input") || el.dataset.g) paintGrouped(el);
+        clearTimeout(hlTimer);
+        hlTimer = setTimeout(() => loadHaulTrips().catch(() => {}), 400);
+      });
+      el.addEventListener("change", () => {
+        clearTimeout(hlTimer);
+        hlTimer = setTimeout(() => loadHaulTrips().catch(() => {}), 400);
+      });
     });
+    document.getElementById("hl-trips-body").addEventListener("click", event => {
+      const tr = event.target.closest("tr.trip-row");
+      if (!tr) return;
+      openHaulTrip(tr.dataset.from, tr.dataset.to).catch(() => {});
+    });
+    document.getElementById("hl-trips-table").addEventListener("click", event => {
+      const th = event.target.closest("tr.cols th");
+      if (!th || !th.dataset.k) return;
+      const key = th.dataset.k;
+      if (tripsSort === key) tripsDir *= -1;
+      else { tripsSort = key; tripsDir = key === "route" || key === "gank" ? 1 : -1; }
+      if (lastTrips?.trips?.length) renderTripsRows();
+    });
+    document.getElementById("hl-change-trip").addEventListener("click", () => {
+      setTripsListVisible(true);
+    });
+    document.getElementById("hl-basket-table").addEventListener("click", event => {
+      const th = event.target.closest("tr.cols th");
+      if (!th || !th.dataset.k) return;
+      const key = th.dataset.k;
+      if (basketSort === key) basketDir *= -1;
+      else { basketSort = key; basketDir = key === "name" || key === "mode" ? 1 : -1; }
+      if (lastBasketRows.length) renderBasketRows();
+    });
+    document.getElementById("hl-copy-mb").addEventListener("click", () => {
+      if (lastTripDetail?.multibuy) navigator.clipboard.writeText(lastTripDetail.multibuy);
+    });
+    document.getElementById("hl-copy-csv").addEventListener("click", () => {
+      if (lastTripDetail?.csv) navigator.clipboard.writeText(lastTripDetail.csv);
+    });
+    document.getElementById("hl-copy-names").addEventListener("click", () => {
+      const names = (lastTripDetail?.trip?.rows || []).map(r => r.name).join("\n");
+      if (names) navigator.clipboard.writeText(names);
+    });
+    fetch("/api/haul/settings").then(r => r.json()).then(s => {
+      if (!s) return;
+      document.getElementById("hl-from").value = s.from || "jita";
+      document.getElementById("hl-to").value = s.to || "any";
+      document.getElementById("hl-ship").value = s.shipPreset || "dst";
+      document.getElementById("hl-cargo").value = iskWhole.format(s.cargoM3 || 60000);
+      document.getElementById("hl-budget").value = iskWhole.format(s.budget || 0);
+      document.getElementById("hl-max-cargo").value = iskWhole.format(s.maxCargoValue || 0);
+      document.getElementById("hl-mode").value = s.mode || "best";
+      document.getElementById("hl-route").value = s.routeFlag || "secure";
+      document.getElementById("hl-horizon").value = s.listHorizonDays || 3;
+      document.getElementById("hl-sec").value = s.secPerJump || 60;
+      document.getElementById("hl-min-profit").value = iskWhole.format(s.minItemProfit || 0);
+      document.getElementById("hl-ask-age").value = s.listMaxAskAgeDays ?? 7;
+      document.getElementById("hl-hist-days").value = s.listHistDays ?? 14;
+      document.getElementById("hl-c-base").value = iskWhole.format(s.courierBase || 0);
+      document.getElementById("hl-c-m3").value = iskWhole.format(s.courierPerM3 || 0);
+      document.getElementById("hl-c-jump").value = iskWhole.format(s.courierPerJump || 0);
+      document.getElementById("hl-c-pct").value = s.courierCollateralPct || 0;
+      hlHorizonUi();
+    }).catch(() => {});
 
     document.getElementById("contracts-run").addEventListener("click", async () => {
       const msg = document.getElementById("contracts-msg");
@@ -1704,8 +2695,8 @@
         tr.innerHTML =
           `<td class="left">#${d.contractId} ${escapeHtml(d.title || "")}</td>` +
           `<td class="left">${escapeHtml(d.itemName)} × ${d.quantity}</td>` +
-          `<td>${iskWhole.format(d.price)}</td><td>${iskWhole.format(d.marketSell)}</td>` +
-          `<td>${iskWhole.format(d.edgeIsk)} (${pct.format(d.edgeFrac)})</td>`;
+          `<td>${isk.format(d.price)}</td><td>${isk.format(d.marketSell)}</td>` +
+          `<td>${isk.format(d.edgeIsk)} (${pct.format(d.edgeFrac)})</td>`;
         body.appendChild(tr);
       }
     });
@@ -1731,14 +2722,14 @@
       const days = Number(document.getElementById("bt-days").value) || 30;
       const dto = await fetch("/api/backtest/shout?days=" + days).then(r => r.json());
       document.getElementById("bt-out").textContent =
-        `Дней ${dto.days}: попаданий фильтра ${dto.hits}, сумма оценок ~${iskWhole.format(dto.sumDailyIsk)}\n` +
+        `Дней ${dto.days}: попаданий фильтра ${dto.hits}, сумма оценок ~${isk.format(dto.sumDailyIsk)}\n` +
         (dto.notes || []).join("\n");
     });
 
     document.getElementById("rf-run").addEventListener("click", async () => {
       const body = {
         oreTypeId: Number(document.getElementById("rf-ore").value),
-        units: Number(document.getElementById("rf-units").value),
+        units: parseGrouped(document.getElementById("rf-units").value),
         efficiency: Number(document.getElementById("rf-eff").value)
       };
       const resp = await fetch("/api/refine", {
@@ -1750,8 +2741,13 @@
         return;
       }
       document.getElementById("rf-out").textContent =
-        `Руда рынок ${iskWhole.format(dto.oreMarketValue)} → выход ${iskWhole.format(dto.outputValue)} · край ${iskWhole.format(dto.edgeIsk)}\n` +
-        (dto.lines || []).map(l => `${l.name}: ${l.qty} × ${iskWhole.format(l.sell)} = ${iskWhole.format(l.value)}`).join("\n");
+        `Руда рынок ${isk.format(dto.oreMarketValue)} → выход ${isk.format(dto.outputValue)} · край ${isk.format(dto.edgeIsk)}\n` +
+        (dto.lines || []).map(l => `${l.name}: ${iskWhole.format(l.qty)} × ${isk.format(l.sell)} = ${isk.format(l.value)}`).join("\n");
+    });
+
+    document.querySelectorAll(".isk-input").forEach(input => {
+      paintGrouped(input);
+      input.addEventListener("input", () => paintGrouped(input));
     });
 
     if (location.hash === "#signal") showView("signal");

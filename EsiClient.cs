@@ -6,7 +6,7 @@ namespace JitaWatch;
 public sealed class Book
 {
     private const decimal Band = 0.01m;
-    private readonly List<(bool IsBuy, decimal Price, long Volume)> _orders = [];
+    private readonly List<(bool IsBuy, decimal Price, long Volume, DateTime? Issued)> _orders = [];
 
     public decimal? BestBuy { get; private set; }
     public decimal BestSell { get; private set; }
@@ -17,18 +17,22 @@ public sealed class Book
     public int BuyOrders { get; private set; }
     public int SellOrders { get; private set; }
     public bool HasSell { get; private set; }
+    /// <summary>Самый старый issued среди ордеров ровно по best buy (UTC).</summary>
+    public DateTime? BestBuyIssued { get; private set; }
+    /// <summary>Самый старый issued среди ордеров ровно по best sell (UTC).</summary>
+    public DateTime? BestSellIssued { get; private set; }
 
-    public void Add(bool isBuy, decimal price, long volume, long orderId = 0)
+    public void Add(bool isBuy, decimal price, long volume, long orderId = 0, DateTime? issued = null)
     {
         if (price <= 0 || volume <= 0)
             return;
-        _orders.Add((isBuy, price, volume));
+        _orders.Add((isBuy, price, volume, issued));
         _ = orderId;
     }
 
     public void Finish()
     {
-        foreach (var (isBuy, price, _) in _orders)
+        foreach (var (isBuy, price, _, _) in _orders)
         {
             if (isBuy)
             {
@@ -42,7 +46,7 @@ public sealed class Book
             }
         }
 
-        foreach (var (isBuy, price, volume) in _orders)
+        foreach (var (isBuy, price, volume, issued) in _orders)
         {
             if (isBuy && BestBuy is decimal buy && price >= buy * (1m - Band))
             {
@@ -55,10 +59,18 @@ public sealed class Book
                 SellOrders++;
             }
 
-            if (isBuy && BestBuy is decimal touch && price == touch)
+            if (isBuy && BestBuy is decimal touchBuy && price == touchBuy)
+            {
                 BuyTouch += volume;
+                if (issued is DateTime ib && (BestBuyIssued is null || ib < BestBuyIssued))
+                    BestBuyIssued = ib;
+            }
             else if (!isBuy && HasSell && price == BestSell)
+            {
                 SellTouch += volume;
+                if (issued is DateTime isell && (BestSellIssued is null || isell < BestSellIssued))
+                    BestSellIssued = isell;
+            }
         }
 
         _orders.Clear();
@@ -134,7 +146,11 @@ public sealed class EsiClient
                     books[order.TypeId] = book;
                 }
 
-                book.Add(order.IsBuyOrder, order.Price, order.VolumeRemain, order.OrderId);
+                DateTime? issued = null;
+                if (!string.IsNullOrWhiteSpace(order.Issued)
+                    && DateTime.TryParse(order.Issued, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var issuedAt))
+                    issued = issuedAt.ToUniversalTime();
+                book.Add(order.IsBuyOrder, order.Price, order.VolumeRemain, order.OrderId, issued);
             }
 
             progress($"{regionLabel}, страница {page} из {pages}");
@@ -180,6 +196,27 @@ public sealed class EsiClient
     {
         var systems = await FetchRouteSystemsAsync(fromSystemId, toSystemId, secure: false, ct);
         return systems is null ? 99 : Math.Max(0, systems.Count - 1);
+    }
+
+    public async Task<(string Name, decimal Security)?> FetchSystemAsync(int systemId, CancellationToken ct)
+    {
+        var url =
+            $"https://esi.evetech.net/latest/universe/systems/{systemId.ToString(CultureInfo.InvariantCulture)}/?datasource=tranquility";
+        using var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        if (!resp.IsSuccessStatusCode)
+        {
+            await PauseIfNeededAsync(resp, ct);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+        }
+
+        await PauseIfNeededAsync(resp, ct);
+        var dto = await resp.Content.ReadFromJsonAsync<SystemDto>(cancellationToken: ct);
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Name))
+            return null;
+        return (dto.Name, dto.SecurityStatus);
     }
 
     /// <summary>null = маршрута нет (часто при flag=secure).</summary>
@@ -471,6 +508,9 @@ public sealed class EsiClient
 
         [JsonPropertyName("volume_remain")]
         public long VolumeRemain { get; set; }
+
+        [JsonPropertyName("issued")]
+        public string? Issued { get; set; }
     }
 
     private sealed class NameDto
@@ -501,6 +541,15 @@ public sealed class EsiClient
 
         [JsonPropertyName("system_id")]
         public int SystemId { get; set; }
+    }
+
+    private sealed class SystemDto
+    {
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("security_status")]
+        public decimal SecurityStatus { get; set; }
     }
 }
 

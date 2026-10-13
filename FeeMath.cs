@@ -1,6 +1,16 @@
 namespace JitaWatch;
 
-public sealed record FeeSettings(int Accounting, int BrokerRelations, decimal FactionStanding, decimal CorpStanding, int KeepDays)
+public sealed record FeeSettings(
+    int Accounting,
+    int BrokerRelations,
+    decimal FactionStanding,
+    decimal CorpStanding,
+    int KeepDays,
+    bool FilterCosmetics = true,
+    bool FilterSpecialEdition = true,
+    bool FilterBlueprints = true,
+    decimal MinSellPrice = 1_000_000m,
+    decimal MinHaulSellPrice = 500_000m)
 {
     public long DatabaseBytes { get; init; }
 
@@ -86,6 +96,15 @@ public static class FeeMath
 
     public static decimal RelistFeePerMove(decimal sell, decimal brokerFee) =>
         RelistRate(brokerFee) * sell;
+
+    /// <summary>Шаг цены EVE при 4 значащих цифрах.</summary>
+    public static decimal PriceTick(decimal price)
+    {
+        if (price <= 0)
+            return 0.01m;
+        var exp = (int)Math.Floor(Math.Log10((double)price)) - 3;
+        return (decimal)Math.Pow(10, exp);
+    }
 
     /// <summary>Чистая маржа с учётом типичных перестановок в день.</summary>
     public static decimal NetMarginAfterRelists(decimal margin, decimal sell, decimal brokerFee, int movesPerDay) =>
