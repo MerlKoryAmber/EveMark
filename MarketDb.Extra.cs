@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 
 namespace JitaWatch;
@@ -226,4 +227,217 @@ public sealed partial class MarketDb
             };
             return new BacktestDto(days, hits, sum, notes);
         }, ct);
+
+    /// <summary>Карточка предмета: текущие цены + дневная история региона (простым языком для UI).</summary>
+    public Task<TypeProbeDto?> GetTypeProbeAsync(int typeId, int? regionId, int days, CancellationToken ct = default) =>
+        WithAsync(async conn =>
+        {
+            if (typeId <= 0)
+                return null;
+            var region = regionId is > 0 ? regionId.Value : TradeHubs.ForgeRegionId;
+            days = Math.Clamp(days, 1, 90);
+            var name = "#" + typeId.ToString(CultureInfo.InvariantCulture);
+            await using (var ncmd = conn.CreateCommand())
+            {
+                ncmd.CommandText = "SELECT name FROM type_name WHERE type_id = $t";
+                ncmd.Parameters.AddWithValue("$t", typeId);
+                var raw = await ncmd.ExecuteScalarAsync(ct) as string;
+                if (!string.IsNullOrWhiteSpace(raw))
+                    name = raw;
+            }
+
+            decimal? bestBuy = null, bestSell = null;
+            long buyVol = 0, sellVol = 0, buyTouch = 0, sellTouch = 0;
+            int hours = 0;
+            await using (var latest = conn.CreateCommand())
+            {
+                latest.CommandText = "SELECT id FROM snapshot ORDER BY taken_at DESC LIMIT 1";
+                var sid = await latest.ExecuteScalarAsync(ct);
+                if (sid is long snapshotId)
+                {
+                    await using var q = conn.CreateCommand();
+                    q.CommandText = """
+                        SELECT best_buy, best_sell, buy_volume, sell_volume, buy_touch, sell_touch
+                        FROM location_quote
+                        WHERE snapshot_id = $s AND type_id = $t AND location_id = $loc
+                        """;
+                    q.Parameters.AddWithValue("$s", snapshotId);
+                    q.Parameters.AddWithValue("$t", typeId);
+                    q.Parameters.AddWithValue("$loc", TradeHubs.Jita.LocationId);
+                    await using var reader = await q.ExecuteReaderAsync(ct);
+                    if (await reader.ReadAsync(ct))
+                    {
+                        if (!reader.IsDBNull(0))
+                            bestBuy = ReadDec(reader, 0);
+                        bestSell = ReadDec(reader, 1);
+                        buyVol = ReadLong(reader, 2);
+                        sellVol = ReadLong(reader, 3);
+                        buyTouch = reader.IsDBNull(4) ? 0 : ReadLong(reader, 4);
+                        sellTouch = reader.IsDBNull(5) ? 0 : ReadLong(reader, 5);
+                    }
+                }
+            }
+
+            var fees = await ReadSettingsAsync(conn);
+            decimal? margin = null, marginFrac = null;
+            if (bestBuy is decimal b && bestSell is decimal s && b > 0 && s > 0)
+            {
+                var m = FeeMath.Margin(b, s, fees.SalesTax, fees.BrokerFee);
+                margin = m.Margin;
+                marginFrac = m.Fraction;
+                var row = new BoardRow
+                {
+                    TypeId = typeId,
+                    Name = name,
+                    BestBuy = b,
+                    BestSell = s,
+                    MarginIsk = m.Margin,
+                    MarginFrac = m.Fraction,
+                    BuyVolume = buyVol,
+                    SellVolume = sellVol,
+                    BuyTouch = buyTouch > 0 ? buyTouch : null,
+                    SellTouch = sellTouch > 0 ? sellTouch : null
+                };
+                var list = new List<BoardRow> { row };
+                await FillHoursAsync(conn, list, fees, ct);
+                hours = list[0].Hours;
+            }
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var todayText = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var from = today.AddDays(-days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var bars = new List<TypeProbeDay>();
+            await using (var h = conn.CreateCommand())
+            {
+                h.CommandText = """
+                    SELECT day, volume, average, highest, lowest
+                    FROM daily_history
+                    WHERE region_id = $r AND type_id = $t AND day < $today AND day >= $from
+                    ORDER BY day DESC
+                    """;
+                h.Parameters.AddWithValue("$r", region);
+                h.Parameters.AddWithValue("$t", typeId);
+                h.Parameters.AddWithValue("$today", todayText);
+                h.Parameters.AddWithValue("$from", from);
+                await using var reader = await h.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    bars.Add(new TypeProbeDay(
+                        reader.GetString(0),
+                        ReadLong(reader, 1),
+                        ReadDec(reader, 2),
+                        ReadDec(reader, 3),
+                        ReadDec(reader, 4)));
+                }
+            }
+
+            decimal? lastAvg = bars.Count > 0 ? bars[0].Average : null;
+            long? lastVol = bars.Count > 0 ? bars[0].Volume : null;
+            string? lastDay = bars.Count > 0 ? bars[0].Day : null;
+            string verdict;
+            string avgPlace;
+            if (lastAvg is null || bestBuy is not decimal buy || bestSell is not decimal sell || buy <= 0 || sell <= 0)
+            {
+                verdict = bars.Count == 0
+                    ? "В базе нет дневной истории по этому предмету. Сначала нужен снимок, который подтянул историю рынка."
+                    : "Нет текущих цен покупки и продажи на Jita 4-4 в последнем снимке.";
+                avgPlace = "unknown";
+            }
+            else if (lastAvg >= buy && lastAvg <= sell)
+            {
+                avgPlace = "inside";
+                verdict =
+                    "В последний полный день средняя цена сделок в регионе была между текущей покупкой и продажей. " +
+                    "Значит, в этом диапазоне цены рынок хотя бы вчера торговал — не только «висящие» ордера.";
+            }
+            else if (lastAvg < buy)
+            {
+                avgPlace = "below_buy";
+                verdict =
+                    "В последний полный день средняя цена сделок была ниже текущей покупки. " +
+                    "Рынок вчера шёл дешевле, чем «лучшая покупка» сейчас — купить дёшево и продать дорого по сегодняшним ордерам может не получиться.";
+            }
+            else
+            {
+                avgPlace = "above_sell";
+                verdict =
+                    "В последний полный день средняя цена сделок была выше текущей продажи. " +
+                    "Рынок вчера шёл дороже, чем «лучшая продажа» сейчас.";
+            }
+
+            if (bestBuy is decimal bb && bestSell is decimal ss && bb > 0 && ss >= bb * 3m
+                && avgPlace is "inside" or "below_buy" or "above_sell")
+            {
+                var times = ss / bb;
+                verdict +=
+                    " Разница цен сейчас очень большая: продажа примерно в "
+                    + times.ToString("0.#", CultureInfo.GetCultureInfo("ru-RU"))
+                    + " раза дороже покупки. Такое бывает и при реальных сделках, и когда ордера просто висят.";
+            }
+
+            long? stationBuy = null, stationSell = null;
+            var watched = false;
+            await using (var w = conn.CreateCommand())
+            {
+                w.CommandText = "SELECT 1 FROM watchlist WHERE type_id = $t LIMIT 1";
+                w.Parameters.AddWithValue("$t", typeId);
+                watched = await w.ExecuteScalarAsync(ct) is not null and not DBNull;
+            }
+
+            if (watched)
+            {
+                var since = Stamp(DateTime.UtcNow.AddHours(-24));
+                await using var f = conn.CreateCommand();
+                f.CommandText = """
+                    SELECT is_buy, SUM(volume) FROM watch_fill
+                    WHERE type_id = $t AND filled_at >= $since
+                    GROUP BY is_buy
+                    """;
+                f.Parameters.AddWithValue("$t", typeId);
+                f.Parameters.AddWithValue("$since", since);
+                await using var reader = await f.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var isBuy = reader.GetInt64(0) != 0;
+                    var vol = ReadLong(reader, 1);
+                    if (isBuy) stationBuy = vol;
+                    else stationSell = vol;
+                }
+            }
+
+            var regionName = region == TradeHubs.ForgeRegionId ? "The Forge (Jita и окрестности)" : region.ToString(CultureInfo.InvariantCulture);
+            return new TypeProbeDto(
+                typeId, name, region, regionName, days,
+                bestBuy, bestSell, margin, marginFrac, hours,
+                buyTouch, sellTouch, buyVol, sellVol,
+                lastDay, lastAvg, lastVol, avgPlace, verdict,
+                watched, stationBuy, stationSell, bars);
+        }, ct);
 }
+
+public sealed record TypeProbeDay(string Day, long Volume, decimal Average, decimal Highest, decimal Lowest);
+
+public sealed record TypeProbeDto(
+    int TypeId,
+    string Name,
+    int RegionId,
+    [property: JsonPropertyName("region_name")] string RegionName,
+    int Days,
+    [property: JsonPropertyName("best_buy")] decimal? BestBuy,
+    [property: JsonPropertyName("best_sell")] decimal? BestSell,
+    [property: JsonPropertyName("margin_isk")] decimal? MarginIsk,
+    [property: JsonPropertyName("margin_frac")] decimal? MarginFrac,
+    int Hours,
+    [property: JsonPropertyName("buy_touch")] long BuyTouch,
+    [property: JsonPropertyName("sell_touch")] long SellTouch,
+    [property: JsonPropertyName("buy_volume")] long BuyVolume,
+    [property: JsonPropertyName("sell_volume")] long SellVolume,
+    [property: JsonPropertyName("last_day")] string? LastDay,
+    [property: JsonPropertyName("last_avg")] decimal? LastAvg,
+    [property: JsonPropertyName("last_volume")] long? LastVolume,
+    [property: JsonPropertyName("avg_place")] string AvgPlace,
+    string Verdict,
+    bool Watched,
+    [property: JsonPropertyName("station_buy_24h")] long? StationBuy24h,
+    [property: JsonPropertyName("station_sell_24h")] long? StationSell24h,
+    IReadOnlyList<TypeProbeDay> History);

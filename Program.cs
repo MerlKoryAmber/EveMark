@@ -131,6 +131,11 @@ internal static class Program
             await poll.PollOnceAsync(ct);
             return Results.Accepted();
         });
+        app.MapGet("/api/type/{typeId:int}/probe", async (int typeId, MarketDb db, int? regionId, int? days, CancellationToken ct) =>
+        {
+            var dto = await db.GetTypeProbeAsync(typeId, regionId, days ?? 14, ct);
+            return dto is null ? Results.NotFound(new { error = "typeId" }) : Results.Ok(dto);
+        });
         app.MapGet("/api/portfolio", async (
             MarketDb db,
             long? capital,

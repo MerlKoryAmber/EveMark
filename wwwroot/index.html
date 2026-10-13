@@ -505,10 +505,97 @@
       .backdrop.show { display: block; }
       .fields { grid-template-columns: 1fr 1fr; }
     }
+    .probe-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 200;
+    }
+    .probe-backdrop.show { display: block; }
+    .probe-panel {
+      display: none;
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: min(28rem, 100%);
+      height: 100%;
+      z-index: 210;
+      background: var(--ir-surface);
+      border-left: 1px solid var(--ir-border);
+      box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+      flex-direction: column;
+      min-height: 0;
+    }
+    .probe-panel.open { display: flex; }
+    .probe-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--ir-border);
+      background: var(--ir-primary-light);
+    }
+    .probe-head h3 { margin: 0; flex: 1; font-size: 1.05rem; font-weight: 600; line-height: 1.3; }
+    .probe-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      padding: 12px 14px 20px;
+    }
+    .probe-verdict {
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--ir-accent) 12%, var(--ir-bg));
+      border: 1px solid var(--ir-border);
+      line-height: 1.45;
+      font-size: 0.92rem;
+    }
+    .probe-verdict.warn {
+      background: color-mix(in srgb, #c45c26 18%, var(--ir-bg));
+    }
+    .probe-meta { margin: 0 0 10px; color: var(--ir-text-muted); font-size: 0.85rem; line-height: 1.4; }
+    .probe-kv {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 12px;
+      margin: 0 0 14px;
+      font-size: 0.9rem;
+    }
+    .probe-kv span:nth-child(odd) { color: var(--ir-text-muted); }
+    .probe-kv span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; }
+    .probe-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .probe-table th, .probe-table td {
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--ir-border);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .probe-table th:first-child, .probe-table td:first-child { text-align: left; }
+    .probe-table th { color: var(--ir-accent); font-weight: 600; }
+    tr.type-probe { cursor: pointer; }
+    tr.type-probe:hover td { background: var(--ir-surface-hover); }
+    button.name-probe {
+      all: unset;
+      cursor: pointer;
+      color: var(--ir-accent);
+      font: inherit;
+    }
+    button.name-probe:hover { text-decoration: underline; color: var(--ir-accent-hover); }
   </style>
 </head>
 <body>
   <div class="backdrop" id="backdrop"></div>
+  <div class="probe-backdrop" id="probe-backdrop"></div>
+  <aside class="probe-panel" id="probe-panel" hidden aria-hidden="true">
+    <div class="probe-head">
+      <h3 id="probe-title">Предмет</h3>
+      <button type="button" class="btn btn-secondary" id="probe-close">Закрыть</button>
+    </div>
+    <div class="probe-body" id="probe-body"></div>
+  </aside>
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-brand">
@@ -1456,6 +1543,102 @@
       return String(value);
     }
 
+    function closeProbe() {
+      const panel = document.getElementById("probe-panel");
+      const bd = document.getElementById("probe-backdrop");
+      panel.classList.remove("open");
+      panel.hidden = true;
+      panel.setAttribute("aria-hidden", "true");
+      bd.classList.remove("show");
+    }
+
+    async function openTypeProbe(typeId) {
+      const id = Number(typeId);
+      if (!id) return;
+      const panel = document.getElementById("probe-panel");
+      const body = document.getElementById("probe-body");
+      const title = document.getElementById("probe-title");
+      document.getElementById("probe-backdrop").classList.add("show");
+      panel.hidden = false;
+      panel.classList.add("open");
+      panel.setAttribute("aria-hidden", "false");
+      title.textContent = "Загрузка…";
+      body.innerHTML = "<p class=\"probe-meta\">Смотрим историю в базе…</p>";
+      try {
+        const dto = await fetch("/api/type/" + id + "/probe?days=14").then(r => {
+          if (!r.ok) throw new Error("нет данных");
+          return r.json();
+        });
+        title.textContent = dto.name || ("#" + id);
+        const warn = dto.avg_place === "below_buy" || dto.avg_place === "above_sell"
+          || (dto.best_buy > 0 && dto.best_sell >= dto.best_buy * 3);
+        let html = `<p class="probe-verdict${warn ? " warn" : ""}">${escapeHtml(dto.verdict || "")}</p>`;
+        html += `<p class="probe-meta">Регион истории: ${escapeHtml(dto.region_name || "")}. `
+          + `Цены покупки/продажи — с станции Jita 4-4 в последнем снимке.</p>`;
+        html += `<div class="probe-kv">`
+          + `<span>Покупка сейчас</span><span>${cell(dto.best_buy, "isk")}</span>`
+          + `<span>Продажа сейчас</span><span>${cell(dto.best_sell, "isk")}</span>`
+          + `<span>Разница с одной штуки</span><span>${cell(dto.margin_isk, "isk")}</span>`
+          + `<span>В процентах от покупки</span><span>${dto.margin_frac != null ? pct.format(dto.margin_frac) : "—"}</span>`
+          + `<span>Часов подряд есть и покупка, и продажа</span><span>${iskWhole.format(dto.hours || 0)}</span>`
+          + `<span>Штук по лучшей покупке</span><span>${iskWhole.format(dto.buy_touch || 0)}</span>`
+          + `<span>Штук по лучшей продаже</span><span>${iskWhole.format(dto.sell_touch || 0)}</span>`
+          + `</div>`;
+        if (dto.last_day) {
+          html += `<p class="probe-meta">Последний полный день (${escapeHtml(dto.last_day)}): `
+            + `средняя цена сделок ${cell(dto.last_avg, "isk")}, `
+            + `штук за день ${iskWhole.format(dto.last_volume || 0)}.</p>`;
+        }
+        if (dto.watched) {
+          html += `<p class="probe-meta">Уже в слежении. За 24 ч на станции поймано сделок: `
+            + `в покупку ${iskWhole.format(dto.station_buy_24h || 0)}, `
+            + `с продажи ${iskWhole.format(dto.station_sell_24h || 0)}.</p>`;
+          html += `<p class="panel-actions" style="margin:0 0 12px">`
+            + `<button type="button" class="btn btn-secondary" disabled>Уже в слежении</button></p>`;
+        } else {
+          html += `<p class="probe-meta">Не в слежении — сделки на станции за сутки не считаются. `
+            + `Кнопка ниже добавит предмет на Jita 4-4.</p>`;
+          html += `<p class="panel-actions" style="margin:0 0 12px">`
+            + `<button type="button" class="btn" id="probe-watch-add" data-t="${id}">В слежение (Jita 4-4)</button>`
+            + `<span class="form-msg" id="probe-watch-msg" style="margin:0"></span></p>`;
+        }
+        html += `<p class="probe-meta"><a href="https://evetycoon.com/market/${id}" target="_blank" rel="noopener">Открыть карточку на EveTycoon</a></p>`;
+        html += `<p class="probe-meta" style="margin-top:12px">Дни в регионе (новые сверху). Средняя — по всем сделкам дня, не только по «лучшей» цене.</p>`;
+        html += `<table class="probe-table"><thead><tr>`
+          + `<th>День</th><th>Штук</th><th>Средняя</th><th>Мин</th><th>Макс</th>`
+          + `</tr></thead><tbody>`;
+        for (const d of (dto.history || [])) {
+          html += `<tr>`
+            + `<td>${escapeHtml(d.day)}</td>`
+            + `<td>${iskWhole.format(d.volume)}</td>`
+            + `<td>${cell(d.average, "isk")}</td>`
+            + `<td>${cell(d.lowest, "isk")}</td>`
+            + `<td>${cell(d.highest, "isk")}</td>`
+            + `</tr>`;
+        }
+        if (!(dto.history || []).length)
+          html += `<tr><td colspan="5">Нет строк истории</td></tr>`;
+        html += `</tbody></table>`;
+        body.innerHTML = html;
+      } catch (e) {
+        title.textContent = "#" + id;
+        body.innerHTML = `<p class="probe-verdict warn">Не удалось открыть карточку. ${escapeHtml(String(e.message || e))}</p>`;
+      }
+    }
+
+    function bindTypeProbeClicks(root) {
+      root.addEventListener("click", event => {
+        if (event.target.closest("input, button:not(.name-probe), a")) return;
+        const btn = event.target.closest(".name-probe");
+        const tr = event.target.closest("tr.type-probe");
+        const id = btn?.dataset.t || tr?.dataset.t;
+        if (id) {
+          event.preventDefault();
+          openTypeProbe(id).catch(() => {});
+        }
+      });
+    }
+
     function renderStatus(s) {
       const bits = [`снимок: ${msk(s.lastSnapshotAt)}`];
       if (s.state === "orders") bits.push("следующий: снимаем");
@@ -1507,10 +1690,12 @@
           : "В этом снимке нет строк с плюсовой маржой.";
       for (const r of shown) {
         const tr = document.createElement("tr");
+        tr.className = "type-probe";
+        tr.dataset.t = String(r.typeId);
         const watched = !!r.watched;
         tr.innerHTML =
           `<td class="watch-pick"><input type="checkbox" class="watch-pick-cb" data-t="${r.typeId}" ${watched ? "checked disabled" : ""} title="${watched ? "Уже в слежении" : "Отметить"}"></td>` +
-          `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
+          `<td class="left"><button type="button" class="name-probe" data-t="${r.typeId}" title="Подробнее: история и понятный вердикт">${escapeHtml(r.name)}</button></td>` +
           `<td>${cell(r.bestBuy, "isk")}</td>` +
           `<td>${cell(r.bestSell, "isk")}</td>` +
           `<td>${cell(r.marginIsk, "isk")}</td>` +
@@ -1727,11 +1912,13 @@
       const cols = signalViews[signalKind].cols;
       for (const r of rows) {
         const tr = document.createElement("tr");
+        tr.className = "type-probe";
+        tr.dataset.t = String(r.typeId);
         if (r.anomaly) tr.style.opacity = "0.55";
         tr.innerHTML = cols.map(col => {
           const [key, , kind] = col;
           if (key === "name")
-            return `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>`;
+            return `<td class="left"><button type="button" class="name-probe" data-t="${r.typeId}" title="Подробнее">${escapeHtml(r.name)}</button></td>`;
           if (kind === "flag")
             return `<td>${r[key] ? "⚠" : ""}</td>`;
           if (kind === "text")
@@ -1832,6 +2019,46 @@
     document.getElementById("backdrop").addEventListener("click", () => showView(
       document.querySelector(".nav-item.active").dataset.view
     ));
+    document.getElementById("probe-close").addEventListener("click", () => closeProbe());
+    document.getElementById("probe-backdrop").addEventListener("click", () => closeProbe());
+    document.getElementById("probe-body").addEventListener("click", async event => {
+      const btn = event.target.closest("#probe-watch-add");
+      if (!btn || btn.disabled) return;
+      const typeId = Number(btn.dataset.t);
+      if (!typeId) return;
+      const msg = document.getElementById("probe-watch-msg");
+      const hub = watchHubs.jita;
+      btn.disabled = true;
+      if (msg) { msg.textContent = "Добавляем…"; msg.className = "form-msg"; }
+      try {
+        const resp = await fetch("/api/watch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            typeId,
+            locationId: hub.locationId,
+            regionId: hub.regionId,
+            note: ""
+          })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          if (msg) { msg.textContent = err.error || "не добавилось"; msg.className = "form-msg err"; }
+          btn.disabled = false;
+          return;
+        }
+        await openTypeProbe(typeId);
+      } catch (e) {
+        if (msg) { msg.textContent = String(e.message || e); msg.className = "form-msg err"; }
+        btn.disabled = false;
+      }
+    });
+    bindTypeProbeClicks(document.getElementById("body"));
+    bindTypeProbeClicks(document.getElementById("signal-body"));
+    bindTypeProbeClicks(document.getElementById("pf-body"));
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") closeProbe();
+    });
     document.querySelectorAll("#view-board tr.cols th").forEach(th => {
       th.addEventListener("click", event => {
         if (event.target.closest("input")) return;
@@ -2304,10 +2531,12 @@
       });
       for (const r of rows) {
         const tr = document.createElement("tr");
-        const mark = r.partial ? ` <span title="урезана по капиталу">✂</span>` : "";
+        tr.className = "type-probe";
+        tr.dataset.t = String(r.type_id);
+        const mark = r.partial ? ` <span title="количество урезано под капитал">✂</span>` : "";
         tr.innerHTML =
           `<td class="watch-pick"><input type="checkbox" class="watch-pick-cb" data-t="${r.type_id}" title="Отметить"></td>` +
-          `<td class="left"><a href="https://evetycoon.com/market/${r.type_id}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>${mark}</td>` +
+          `<td class="left"><button type="button" class="name-probe" data-t="${r.type_id}" title="Подробнее">${escapeHtml(r.name)}</button>${mark}</td>` +
           `<td class="left">${escapeHtml(r.location || "")}</td>` +
           `<td>${isk.format(r.buy)}</td><td>${isk.format(r.sell)}</td>` +
           `<td>${isk.format(r.buy_post)}</td><td>${isk.format(r.sell_post)}</td>` +
