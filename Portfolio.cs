@@ -17,6 +17,7 @@ public sealed record PortfolioSettings(
     decimal MaxMarketShare = 0.30m,
     long MinProfitDay = 1_000_000,
     int MinHours = 6,
+    long MinVolumeDay = 10,
     int MaxRelistsDay = 12,
     bool SourceJita = true,
     bool SourcePerimeter = true,
@@ -101,6 +102,7 @@ public sealed record PortfolioTotals(
 public sealed record PortfolioRejected(
     [property: JsonPropertyName("no_margin")] int NoMargin,
     [property: JsonPropertyName("low_hours")] int LowHours,
+    [property: JsonPropertyName("low_volume")] int LowVolume,
     [property: JsonPropertyName("low_profit")] int LowProfit,
     int Excluded,
     int Dedup);
@@ -135,10 +137,11 @@ public static class PortfolioBuilder
         string? snapshotTime)
     {
         var exclude = new HashSet<int>(settings.Exclude ?? []);
-        var rejected = new PortfolioRejected(0, 0, 0, 0, 0);
+        var rejected = new PortfolioRejected(0, 0, 0, 0, 0, 0);
         var built = new List<PortfolioCandidate>();
         var noMargin = 0;
         var lowHours = 0;
+        var lowVolume = 0;
         var lowProfit = 0;
         var excluded = 0;
 
@@ -167,6 +170,12 @@ public static class PortfolioBuilder
             if (v is not > 0)
             {
                 noMargin++;
+                continue;
+            }
+
+            if (v.Value < settings.MinVolumeDay)
+            {
+                lowVolume++;
                 continue;
             }
 
@@ -207,7 +216,7 @@ public static class PortfolioBuilder
                 byType[c.TypeId] = c;
         }
 
-        rejected = new PortfolioRejected(noMargin, lowHours, lowProfit, excluded, dedupDropped);
+        rejected = new PortfolioRejected(noMargin, lowHours, lowVolume, lowProfit, excluded, dedupDropped);
         var candidates = byType.Values
             .Select(c => new OptCand
             {

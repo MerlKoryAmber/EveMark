@@ -178,7 +178,7 @@ public sealed partial class MarketDb
                         volDay.TryGetValue((typeId, toMeta.RegionId), out var vB);
                         histCap.TryGetValue((typeId, toMeta.RegionId), out var histAvg);
                         var askAge = HaulPlanner.AskAgeDays(toBook.BestSellIssued, utcNow);
-                        var neighborCap = HaulPlanner.NeighborSellCap(hubBestSell, typeId, toKey);
+                        var neighborCap = HaulPlanner.NeighborSellCap(hubBestSell, typeId, fromKey, toKey);
                         var competitors = Math.Max(0, (int)toBook.SellOrders - 1);
                         if (competitors < 0)
                             competitors = 0;

@@ -209,7 +209,8 @@ public sealed record ColumnFilter(
     NumRange Relists,
     NumRange Capital,
     NumRange Days,
-    NumRange DailyRoi);
+    NumRange DailyRoi,
+    NumRange NetMarginIsk = default);
 
 public sealed partial class MarketDb
 {
@@ -1345,13 +1346,15 @@ public sealed partial class MarketDb
             var takenAt = load.TakenAt;
             var rawCount = load.Tracked;
 
+            var sortKey = SortKey(sort);
+            var hoursFilterOn = filter.Hours.Min is not null || filter.Hours.Max is not null || filter.Hours.Bad;
+            // Часы считаются отдельным проходом; до FillHours у строк Hours=0 — фильтр/сорт по часам только после.
+            if (hoursFilterOn || sortKey == "hours")
+                await FillHoursAsync(conn, ranked, fees, ct);
             var filtered = ranked
                 .Where(row => row.MarginFrac * 100m <= MaxBoardMarginPercent && MatchesColumns(row, filter))
                 .ToList();
-            var sortKey = SortKey(sort);
             var descending = !string.Equals(dir, "asc", StringComparison.OrdinalIgnoreCase);
-            if (sortKey == "hours")
-                await FillHoursAsync(conn, filtered, fees, ct);
             filtered.Sort((a, b) =>
             {
                 var empty = NullsLast(a, b, sortKey);
@@ -1367,7 +1370,7 @@ public sealed partial class MarketDb
             var pages = Math.Max(1, (int)Math.Ceiling(filtered.Count / (double)pageSize));
             var current = Math.Clamp(page, 1, pages);
             var rows = filtered.Skip((current - 1) * pageSize).Take(pageSize).ToList();
-            if (sortKey != "hours")
+            if (!hoursFilterOn && sortKey != "hours")
                 await FillHoursAsync(conn, rows, fees, ct);
             return new BoardDto
             {
@@ -1793,6 +1796,9 @@ public sealed partial class MarketDb
             "capital" => a.Capital is null,
             "days" => a.Days is null,
             "dailyRoi" => a.DailyRoi is null,
+            "captureShare" => a.CaptureShare is null,
+            "stationVolume24h" => a.StationVolume24h is null,
+            "netMarginIsk" => a.NetMarginIsk is null,
             _ => null
         };
         if (missing is null)
@@ -1807,6 +1813,9 @@ public sealed partial class MarketDb
             "capital" => b.Capital is null,
             "days" => b.Days is null,
             "dailyRoi" => b.DailyRoi is null,
+            "captureShare" => b.CaptureShare is null,
+            "stationVolume24h" => b.StationVolume24h is null,
+            "netMarginIsk" => b.NetMarginIsk is null,
             _ => b.DailyIsk is null
         };
         if (missing == other)
@@ -1838,6 +1847,10 @@ public sealed partial class MarketDb
         "capital" => Nullable.Compare(a.Capital, b.Capital),
         "days" => Nullable.Compare(a.Days, b.Days),
         "dailyRoi" => Nullable.Compare(a.DailyRoi, b.DailyRoi),
+        "competitors" => a.Competitors.CompareTo(b.Competitors),
+        "captureShare" => Nullable.Compare(a.CaptureShare, b.CaptureShare),
+        "stationVolume24h" => Nullable.Compare(a.StationVolume24h, b.StationVolume24h),
+        "netMarginIsk" => Nullable.Compare(a.NetMarginIsk, b.NetMarginIsk),
         "average" => Nullable.Compare(a.Average, b.Average),
         "buyMoves" => a.BuyMoves.CompareTo(b.BuyMoves),
         "sellMoves" => a.SellMoves.CompareTo(b.SellMoves),
@@ -1851,7 +1864,8 @@ public sealed partial class MarketDb
         "name" or "bestBuy" or "bestSell" or "marginIsk" or "marginFrac"
             or "dailyVolume" or "dailyIsk" or "hours" or "buyVolume" or "sellVolume"
             or "average" or "buyMoves" or "sellMoves" or "marginThen" or "thin"
-            or "buyTouch" or "sellTouch" or "relists" or "capital" or "days" or "dailyRoi" => sort,
+            or "buyTouch" or "sellTouch" or "relists" or "capital" or "days" or "dailyRoi"
+            or "competitors" or "captureShare" or "stationVolume24h" or "netMarginIsk" => sort,
         _ => "dailyIsk"
     };
 
@@ -1865,6 +1879,7 @@ public sealed partial class MarketDb
             && filter.DailyVolume.Fits(row.DailyVolume)
             && filter.DailyIsk.Fits(row.DailyIsk)
             && filter.Hours.Fits(row.Hours)
+            && filter.NetMarginIsk.Fits(row.NetMarginIsk)
             && filter.BuyVolume.Fits(row.BuyVolume)
             && filter.SellVolume.Fits(row.SellVolume)
             && filter.BuyTouch.Fits(row.BuyTouch)

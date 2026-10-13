@@ -909,6 +909,9 @@
               <label class="field">Мин. часов
                 <input id="pf-min-hours" type="number" min="0" value="6">
               </label>
+              <label class="field" title="Медиана объёма/сутки (как на закупе). Ниже порога не брать.">Мин. объём/сут
+                <input id="pf-min-volume" class="isk-input" data-g="1" type="text" inputmode="numeric" value="10">
+              </label>
             </div>
             <div class="fields-check" style="margin-top:8px">
               <label class="field"><input id="pf-src-jita" type="checkbox" checked> Jita</label>
@@ -1145,8 +1148,11 @@
         minimumFractionDigits: 0
       }).format(n).replace(/[\u00a0\u202f]/g, " ");
     }
-    const isk = { format: v => fmtNum(v, 2) };
-    const iskWhole = { format: v => fmtNum(v, 0) };
+    /** Деньги в UI целыми ISK (скелет). */
+    const isk = { format: v => fmtNum(v, 0) };
+    const iskWhole = isk;
+    /** Объёмы м³, дни, прочие дроби «как есть» — не ISK. */
+    const dec = { format: v => fmtNum(v, 2) };
     const titles = { board: "Закуп", signal: "Сигнал", haul: "Развоз", portfolio: "Портфель", watch: "Слежение", tools: "Ещё", fees: "Настройки" };
     let lastTrips = null;
     let lastTripDetail = null;
@@ -1445,7 +1451,7 @@
     function cell(value, kind) {
       if (value == null || value === "") return "—";
       if (kind === "pct") return pct.format(value);
-      if (kind === "num") return isk.format(value);
+      if (kind === "num") return dec.format(value);
       if (kind === "isk") return isk.format(value);
       return String(value);
     }
@@ -1562,11 +1568,22 @@
     }
 
     function showView(name) {
+      const known = Object.keys(titles);
+      if (!known.includes(name)) name = "board";
       document.querySelectorAll(".nav-item").forEach(btn => btn.classList.toggle("active", btn.dataset.view === name));
       document.querySelectorAll(".view").forEach(view => { view.hidden = view.id !== "view-" + name; });
       document.getElementById("title").textContent = titles[name] || name;
       document.getElementById("sidebar").classList.remove("open");
       document.getElementById("backdrop").classList.remove("show");
+      try {
+        localStorage.setItem("jita-view", name);
+        if (name === "haul") localStorage.setItem("jita-haul-tab", haulTab);
+      } catch (_) {}
+      if (name === "board") {
+        if (location.hash && location.hash !== "#") history.replaceState(null, "", location.pathname + location.search);
+      } else if (location.hash !== "#" + name) {
+        history.replaceState(null, "", "#" + name);
+      }
       if (name === "signal") loadSignals().catch(() => {});
       if (name === "haul") {
         if (haulTab === "trip") loadHaulTrips().catch(() => {});
@@ -2163,10 +2180,34 @@
         maxShareItem: String((Number(document.getElementById("pf-max-share").value) || 20) / 100),
         minProfitDay: String(parseIskFlexible(document.getElementById("pf-min-profit").value)),
         minHours: document.getElementById("pf-min-hours").value || "6",
+        minVolumeDay: String(parseIskFlexible(document.getElementById("pf-min-volume").value)),
         jita: document.getElementById("pf-src-jita").checked ? "true" : "false",
         perimeter: document.getElementById("pf-src-perimeter").checked ? "true" : "false"
       });
       return p;
+    }
+
+    let pfHydrated = false;
+
+    function applyPortfolioSettings(s) {
+      if (!s) return;
+      document.getElementById("pf-capital").value = iskWhole.format(s.capital ?? 1_000_000_000);
+      document.getElementById("pf-slots-mode").value = s.slotsMode || "manual";
+      document.getElementById("pf-slots").value = s.slots ?? 20;
+      document.getElementById("pf-trade").value = s.skillTrade ?? 0;
+      document.getElementById("pf-retail").value = s.skillRetail ?? 0;
+      document.getElementById("pf-wholesale").value = s.skillWholesale ?? 0;
+      document.getElementById("pf-tycoon").value = s.skillTycoon ?? 0;
+      document.getElementById("pf-slots-used").value = s.slotsUsed ?? 0;
+      document.getElementById("pf-horizon").value = s.horizonDays ?? 2;
+      document.getElementById("pf-max-share").value = Math.round((s.maxShareItem ?? 0.2) * 100);
+      document.getElementById("pf-min-profit").value = iskWhole.format(s.minProfitDay ?? 1_000_000);
+      document.getElementById("pf-min-hours").value = s.minHours ?? 6;
+      document.getElementById("pf-min-volume").value = iskWhole.format(s.minVolumeDay ?? 10);
+      document.getElementById("pf-src-jita").checked = s.sourceJita !== false;
+      document.getElementById("pf-src-perimeter").checked = s.sourcePerimeter !== false;
+      pfSlotsModeUi();
+      document.querySelectorAll("#view-portfolio .isk-input, #view-portfolio [data-g]").forEach(paintGrouped);
     }
 
     async function savePortfolioSettings() {
@@ -2181,13 +2222,13 @@
         slotsUsed: Number(document.getElementById("pf-slots-used").value) || 0,
         horizonDays: Number(document.getElementById("pf-horizon").value) || 2,
         maxShareItem: (Number(document.getElementById("pf-max-share").value) || 20) / 100,
-        maxMarketShare: 0.3,
+        maxMarketShare: lastPortfolio?.settings?.maxMarketShare ?? 0.3,
         minProfitDay: parseIskFlexible(document.getElementById("pf-min-profit").value),
         minHours: Number(document.getElementById("pf-min-hours").value) || 0,
-        maxRelistsDay: 12,
+        minVolumeDay: parseIskFlexible(document.getElementById("pf-min-volume").value),
+        maxRelistsDay: lastPortfolio?.settings?.maxRelistsDay ?? 12,
         sourceJita: document.getElementById("pf-src-jita").checked,
-        sourcePerimeter: document.getElementById("pf-src-perimeter").checked,
-        exclude: lastPortfolio?.settings?.exclude || []
+        sourcePerimeter: document.getElementById("pf-src-perimeter").checked
       };
       await fetch("/api/portfolio/settings", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
@@ -2198,8 +2239,18 @@
       const msg = document.getElementById("pf-msg");
       msg.textContent = "Считаем…";
       pfSlotsModeUi();
-      await savePortfolioSettings().catch(() => {});
-      const dto = await fetch("/api/portfolio?" + portfolioQuery()).then(r => r.json());
+      let dto;
+      if (!pfHydrated) {
+        // Без query — сервер берёт pf_* из БД; форма подтягивается, дефолты HTML не затирают.
+        dto = await fetch("/api/portfolio").then(r => r.json());
+        if (!dto.error) {
+          applyPortfolioSettings(dto.settings);
+          pfHydrated = true;
+        }
+      } else {
+        await savePortfolioSettings().catch(() => {});
+        dto = await fetch("/api/portfolio?" + portfolioQuery()).then(r => r.json());
+      }
       if (dto.error) {
         msg.textContent = dto.error;
         msg.className = "form-msg err";
@@ -2213,10 +2264,10 @@
       document.getElementById("pf-totals").textContent =
         `${t.positions || 0} позиций · ${t.slots_used || 0}/${inp.slots || 0} слотов · ` +
         `${isk.format(t.capital_used)} / ${isk.format(inp.capital)} · ` +
-        `${isk.format(t.profit_day)}/сутки · ${isk.format(t.roi_day_pct)}%/сутки · оборот ${isk.format(t.avg_turnover_days)} дн`;
+        `${isk.format(t.profit_day)}/сутки · ${dec.format(t.roi_day_pct)}%/сутки · оборот ${dec.format(t.avg_turnover_days)} дн`;
       const rj = dto.rejected_count || {};
       document.getElementById("pf-rejected").textContent =
-        `Отсеяно: нет маржи ${rj.no_margin || 0}, мало часов ${rj.low_hours || 0}, ниже порога ${rj.low_profit || 0}, исключено ${rj.excluded || 0}, дубль Jita/Perimeter ${rj.dedup || 0}`;
+        `Отсеяно: нет маржи ${rj.no_margin || 0}, мало часов ${rj.low_hours || 0}, мало объёма ${rj.low_volume || 0}, ниже порога ${rj.low_profit || 0}, исключено ${rj.excluded || 0}, дубль Jita/Perimeter ${rj.dedup || 0}`;
       const ex = (dto.settings && dto.settings.exclude) || [];
       document.getElementById("portfolio-excluded-btn").textContent = `Исключённые (${ex.length})`;
       renderPortfolioRows();
@@ -2260,12 +2311,12 @@
           `<td class="left">${escapeHtml(r.location || "")}</td>` +
           `<td>${isk.format(r.buy)}</td><td>${isk.format(r.sell)}</td>` +
           `<td>${isk.format(r.buy_post)}</td><td>${isk.format(r.sell_post)}</td>` +
-          `<td>${isk.format(r.margin)}</td><td>${isk.format(r.margin_pct)}</td>` +
+          `<td>${isk.format(r.margin)}</td><td>${dec.format(r.margin_pct)}</td>` +
           `<td>${iskWhole.format(r.qty)}</td><td>${isk.format(r.capital)}</td>` +
           `<td>${iskWhole.format(r.volume_day)}</td><td>${iskWhole.format(r.competitors)}</td>` +
-          `<td>${isk.format(r.share_pct)}</td><td>${isk.format(r.relists_day)}</td>` +
-          `<td>${isk.format(r.profit_day)}</td><td>${isk.format(r.roi_day_pct)}</td>` +
-          `<td>${isk.format(r.turnover_days)}</td><td>${iskWhole.format(r.hours)}</td>` +
+          `<td>${dec.format(r.share_pct)}</td><td>${dec.format(r.relists_day)}</td>` +
+          `<td>${isk.format(r.profit_day)}</td><td>${dec.format(r.roi_day_pct)}</td>` +
+          `<td>${dec.format(r.turnover_days)}</td><td>${iskWhole.format(r.hours)}</td>` +
           `<td><button type="button" class="btn btn-secondary pf-x" data-t="${r.type_id}">✕</button></td>`;
         body.appendChild(tr);
       }
@@ -2301,6 +2352,7 @@
     document.getElementById("portfolio-run").addEventListener("click", () => loadPortfolio().catch(() => {}));
     document.getElementById("pf-slots-mode").addEventListener("change", () => { pfSlotsModeUi(); schedulePortfolio(); });
     document.querySelectorAll("#view-portfolio input, #view-portfolio select").forEach(el => {
+      if (el.id === "pf-watch-all" || el.classList.contains("watch-pick-cb")) return;
       el.addEventListener("input", () => {
         if (el.classList.contains("isk-input") || el.dataset.g) paintGrouped(el);
         pfSlotsModeUi();
@@ -2309,6 +2361,7 @@
       el.addEventListener("change", () => schedulePortfolio());
     });
     function schedulePortfolio() {
+      if (!pfHydrated) return;
       clearTimeout(pfTimer);
       pfTimer = setTimeout(() => loadPortfolio().catch(() => {}), 400);
     }
@@ -2378,7 +2431,12 @@
         hint.textContent = "Режим «лучшее»: в скупку или выставить. List режет мёртвые ask возрастом, историей и ценой соседей. Клик по заголовку — сортировка.";
     }
 
+    let hlHydrated = false;
+    let hlSaved = null;
+
     async function saveHaulSettings() {
+      if (!hlHydrated) return;
+      const prev = hlSaved || {};
       const body = {
         from: document.getElementById("hl-from").value,
         to: document.getElementById("hl-to").value,
@@ -2389,23 +2447,24 @@
         mode: document.getElementById("hl-mode").value,
         routeFlag: document.getElementById("hl-route").value,
         listHorizonDays: Number(document.getElementById("hl-horizon").value) || 3,
-        maxMarketShare: 0.3,
+        maxMarketShare: prev.maxMarketShare ?? 0.3,
         minItemProfit: parseGrouped(document.getElementById("hl-min-profit").value),
         secPerJump: Number(document.getElementById("hl-sec").value) || 60,
-        gankSystems: "Uedama, Sivala, Ahbazon",
-        gankWarnValue: 1000000000,
-        minUnitPrice: 500000,
+        gankSystems: prev.gankSystems ?? "Uedama, Sivala, Ahbazon",
+        gankWarnValue: prev.gankWarnValue ?? 1000000000,
+        minUnitPrice: prev.minUnitPrice ?? 500000,
         courierBase: parseGrouped(document.getElementById("hl-c-base").value),
         courierPerM3: parseGrouped(document.getElementById("hl-c-m3").value),
         courierPerJump: parseGrouped(document.getElementById("hl-c-jump").value),
         courierCollateralPct: Number(document.getElementById("hl-c-pct").value) || 0,
-        courierMaxM3: 0,
+        courierMaxM3: prev.courierMaxM3 ?? 0,
         listMaxAskAgeDays: Number(document.getElementById("hl-ask-age").value) || 0,
         listHistDays: Number(document.getElementById("hl-hist-days").value) || 14
       };
-      await fetch("/api/haul/settings", {
+      const resp = await fetch("/api/haul/settings", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
       });
+      if (resp.ok) hlSaved = await resp.json();
     }
 
     function setTripsListVisible(show) {
@@ -2475,10 +2534,10 @@
           `<td>${Number(t.min_sec).toFixed(1)}</td>` +
           `<td class="${t.gank_warning ? "gank-hot" : ""}">${escapeHtml(gank)}</td>` +
           `<td>${iskWhole.format(t.items)}</td>` +
-          `<td>${isk.format(t.fill_pct)}</td>` +
+          `<td>${dec.format(t.fill_pct)}</td>` +
           `<td>${isk.format(t.cost)}</td>` +
           `<td>${isk.format(t.profit)}</td>` +
-          `<td>${isk.format(t.roi_pct)}</td>` +
+          `<td>${dec.format(t.roi_pct)}</td>` +
           `<td>${isk.format(t.isk_per_jump)}</td>` +
           `<td>${isk.format(t.isk_per_hour)}</td>` +
           `<td>${t.days_to_sell > 0 ? Number(t.days_to_sell).toFixed(1) : "—"}</td>` +
@@ -2495,6 +2554,7 @@
       const msg = document.getElementById("hl-msg");
       msg.textContent = "Считаем рейсы…";
       msg.className = "form-msg";
+      await hlReady.catch(() => {});
       await saveHaulSettings().catch(() => {});
       const dto = await fetch("/api/haul/trips?" + haulQuery()).then(r => r.json());
       lastTrips = dto;
@@ -2547,14 +2607,14 @@
           `<td class="left"><a href="https://evetycoon.com/market/${r.type_id}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
           `<td>${escapeHtml(r.mode)}</td>` +
           `<td>${iskWhole.format(r.qty)}</td>` +
-          `<td>${isk.format(r.m3)}</td>` +
+          `<td>${dec.format(r.m3)}</td>` +
           `<td>${isk.format(r.buy_avg)}</td>` +
           `<td>${isk.format(r.buy_max)}</td>` +
           `<td>${isk.format(r.cost)}</td>` +
           `<td>${isk.format(r.sell_avg)}</td>` +
           `<td>${isk.format(r.sell_min)}</td>` +
           `<td>${isk.format(r.profit)}</td>` +
-          `<td>${isk.format(r.profit_pct)}</td>` +
+          `<td>${dec.format(r.profit_pct)}</td>` +
           `<td>${iskWhole.format(r.volume_day_B)}</td>` +
           `<td>${r.days_to_sell > 0 ? Number(r.days_to_sell).toFixed(1) : "—"}</td>` +
           `<td>${r.ask_age_days != null ? Number(r.ask_age_days).toFixed(1) : "—"}</td>`;
@@ -2594,20 +2654,24 @@
       msg.textContent = `Позиций: ${lastBasketRows.length}`;
     }
 
-    document.querySelectorAll("[data-haul-tab]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        haulTab = btn.dataset.haulTab;
-        document.querySelectorAll("[data-haul-tab]").forEach(b => {
-          b.classList.toggle("btn-secondary", b.dataset.haulTab !== haulTab);
-        });
-        document.getElementById("haul-board-pane").hidden = haulTab !== "board";
-        document.getElementById("haul-trip-pane").hidden = haulTab !== "trip";
-        document.getElementById("haul-hint").textContent = haulTab === "trip"
-          ? "Планировщик рейса: корзина на один A→B под трюм и бюджет."
-          : "Купить чужой sell от 500 тыс., отвезти. Мгновенно — в чужой buy. Либо выставить свой sell на месте.";
+    function applyHaulTab(tab, load) {
+      haulTab = tab === "trip" ? "trip" : "board";
+      document.querySelectorAll("[data-haul-tab]").forEach(b => {
+        b.classList.toggle("btn-secondary", b.dataset.haulTab !== haulTab);
+      });
+      document.getElementById("haul-board-pane").hidden = haulTab !== "board";
+      document.getElementById("haul-trip-pane").hidden = haulTab !== "trip";
+      document.getElementById("haul-hint").textContent = haulTab === "trip"
+        ? "Планировщик рейса: корзина на один A→B под трюм и бюджет."
+        : "Купить чужой sell от 500 тыс., отвезти. Мгновенно — в чужой buy. Либо выставить свой sell на месте.";
+      try { localStorage.setItem("jita-haul-tab", haulTab); } catch (_) {}
+      if (load) {
         if (haulTab === "trip") loadHaulTrips().catch(() => {});
         else loadHaul().catch(() => {});
-      });
+      }
+    }
+    document.querySelectorAll("[data-haul-tab]").forEach(btn => {
+      btn.addEventListener("click", () => applyHaulTab(btn.dataset.haulTab, true));
     });
     document.getElementById("hl-ship").addEventListener("change", () => {
       const key = document.getElementById("hl-ship").value;
@@ -2661,8 +2725,9 @@
       const names = (lastTripDetail?.trip?.rows || []).map(r => r.name).join("\n");
       if (names) navigator.clipboard.writeText(names);
     });
-    fetch("/api/haul/settings").then(r => r.json()).then(s => {
-      if (!s) return;
+    const hlReady = fetch("/api/haul/settings").then(r => r.json()).then(s => {
+      if (!s) { hlHydrated = true; return; }
+      hlSaved = s;
       document.getElementById("hl-from").value = s.from || "jita";
       document.getElementById("hl-to").value = s.to || "any";
       document.getElementById("hl-ship").value = s.shipPreset || "dst";
@@ -2681,7 +2746,8 @@
       document.getElementById("hl-c-jump").value = iskWhole.format(s.courierPerJump || 0);
       document.getElementById("hl-c-pct").value = s.courierCollateralPct || 0;
       hlHorizonUi();
-    }).catch(() => {});
+      hlHydrated = true;
+    }).catch(() => { hlHydrated = true; });
 
     document.getElementById("contracts-run").addEventListener("click", async () => {
       const msg = document.getElementById("contracts-msg");
@@ -2750,8 +2816,22 @@
       input.addEventListener("input", () => paintGrouped(input));
     });
 
-    if (location.hash === "#signal") showView("signal");
-    if (location.hash === "#watch") showView("watch");
+    try {
+      const savedHaul = localStorage.getItem("jita-haul-tab");
+      if (savedHaul === "trip" || savedHaul === "board") applyHaulTab(savedHaul, false);
+    } catch (_) {}
+    {
+      const fromHash = (location.hash || "").replace(/^#/, "");
+      let start = "board";
+      try {
+        start = localStorage.getItem("jita-view") || fromHash || "board";
+      } catch (_) {
+        start = fromHash || "board";
+      }
+      if (fromHash && Object.keys(titles).includes(fromHash)) start = fromHash;
+      if (!Object.keys(titles).includes(start)) start = "board";
+      if (start !== "board") showView(start);
+    }
     tick();
     setInterval(() => {
       fetch("/api/status").then(r => r.json()).then(renderStatus).catch(() => {});

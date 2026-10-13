@@ -247,7 +247,7 @@ public static class HaulPlanner
 
     /// <summary>
     /// Опорная цена list: min(best_sell−tick, histCap, neighborCap).
-    /// Старый ask (возраст &gt; maxAge) не якорь — только история; без истории list нет.
+    /// Старый ask (возраст &gt; maxAge) не якорь — min(история, соседние кроме A/B); без истории list нет.
     /// </summary>
     public static decimal? ResolveListSellPost(
         decimal bestSellB,
@@ -263,7 +263,14 @@ public static class HaulPlanner
             return null;
         var stale = maxAskAgeDays > 0 && askAgeDays is decimal age && age > maxAskAgeDays;
         if (stale)
-            return histCap is decimal h && h > 0 ? h : null;
+        {
+            if (histCap is not decimal h || h <= 0)
+                return null;
+            var stalePost = h;
+            if (neighborCap is decimal nStale && nStale > 0)
+                stalePost = Math.Min(stalePost, nStale);
+            return stalePost;
+        }
         var post = fromAsk;
         if (histCap is decimal cap && cap > 0)
             post = Math.Min(post, cap);
@@ -272,16 +279,20 @@ public static class HaulPlanner
         return post;
     }
 
-    /// <summary>Мин. best_sell того же типа на других хабах (потолок «рядом дешевле»).</summary>
+    /// <summary>
+    /// Мин. best_sell на хабах кроме A и B. A нельзя включать: иначе post ≤ askA и после налога list всегда ≤ 0.
+    /// </summary>
     public static decimal? NeighborSellCap(
         IReadOnlyDictionary<string, Dictionary<int, decimal>> hubBestSell,
         int typeId,
-        string excludeHub)
+        string fromHub,
+        string toHub)
     {
         decimal? min = null;
         foreach (var (hub, byType) in hubBestSell)
         {
-            if (string.Equals(hub, excludeHub, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(hub, fromHub, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(hub, toHub, StringComparison.OrdinalIgnoreCase))
                 continue;
             if (!byType.TryGetValue(typeId, out var sell) || sell <= 0)
                 continue;
@@ -620,16 +631,26 @@ public static class HaulSelfTest
             var stale = HaulPlanner.ResolveListSellPost(2_110_000_000m, 1_674_000_000m, 677_100_000m, 40m, 7m);
             var fresh = HaulPlanner.ResolveListSellPost(900_000_000m, 1_674_000_000m, 677_100_000m, 1m, 7m);
             var staleNoHist = HaulPlanner.ResolveListSellPost(2_110_000_000m, null, 677_100_000m, 40m, 7m);
-            Check("list_age", stale == 1_674_000_000m && fresh == 677_100_000m && staleNoHist is null,
+            // stale: hist ∧ neighbor (ask не якорь, но соседний потолок остаётся)
+            Check("list_age", stale == 677_100_000m && fresh == 677_100_000m && staleNoHist is null,
                 $"stale={stale} fresh={fresh} noHist={staleNoHist}");
+            // A=rens B=hek — потолок с jita/dodixie, не с A
             var neigh = HaulPlanner.NeighborSellCap(
                 new Dictionary<string, Dictionary<int, decimal>>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["hek"] = new() { [1] = 2_110_000_000m },
+                    ["rens"] = new() { [1] = 500_000_000m },
                     ["jita"] = new() { [1] = 677_100_000m },
                     ["dodixie"] = new() { [1] = 853_800_000m }
-                }, 1, "hek");
+                }, 1, "rens", "hek");
             Check("list_neigh", neigh == 677_100_000m, neigh?.ToString(CultureInfo.InvariantCulture) ?? "null");
+            var neighOnlyAb = HaulPlanner.NeighborSellCap(
+                new Dictionary<string, Dictionary<int, decimal>>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["hek"] = new() { [1] = 2_110_000_000m },
+                    ["rens"] = new() { [1] = 500_000_000m }
+                }, 1, "rens", "hek");
+            Check("list_neigh2", neighOnlyAb is null, neighOnlyAb?.ToString(CultureInfo.InvariantCulture) ?? "null");
         }
 
         // days_to_sell ≤ горизонта при qty ≤ q_list_max

@@ -53,26 +53,54 @@ public sealed partial class MarketDb
         }, ct);
 
     public Task AddWatchAsync(int typeId, long locationId, int regionId, string? note, CancellationToken ct = default) =>
-        WithAsync(conn => ExecAsync(conn, """
-            INSERT INTO watchlist (type_id, location_id, region_id, note, created_at)
-            VALUES ($t, $l, $r, $n, $at)
-            ON CONFLICT(type_id, location_id) DO UPDATE SET
-                region_id = excluded.region_id,
-                note = excluded.note
-            """,
-            ("$t", typeId),
-            ("$l", locationId),
-            ("$r", regionId),
-            ("$n", note ?? ""),
-            ("$at", Stamp(DateTime.UtcNow))), ct);
+        WithAsync(async conn =>
+        {
+            await ExecAsync(conn, """
+                INSERT INTO watchlist (type_id, location_id, region_id, note, created_at)
+                VALUES ($t, $l, $r, $n, $at)
+                ON CONFLICT(type_id, location_id) DO UPDATE SET
+                    region_id = excluded.region_id,
+                    note = excluded.note
+                """,
+                ("$t", typeId),
+                ("$l", locationId),
+                ("$r", regionId),
+                ("$n", note ?? ""),
+                ("$at", Stamp(DateTime.UtcNow)));
+            // Сброс ETag: иначе 304 оставляет пустой watch_order после remove+add.
+            await ClearOrdersEtagAsync(conn, regionId, typeId);
+        }, ct);
 
     public Task RemoveWatchAsync(int typeId, long locationId, CancellationToken ct = default) =>
-        WithAsync(conn => ExecAsync(conn, """
-            DELETE FROM watchlist WHERE type_id = $t AND location_id = $l;
-            DELETE FROM watch_order WHERE type_id = $t AND location_id = $l;
-            """,
-            ("$t", typeId),
-            ("$l", locationId)), ct);
+        WithAsync(async conn =>
+        {
+            int? regionId = null;
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT region_id FROM watchlist WHERE type_id = $t AND location_id = $l";
+                cmd.Parameters.AddWithValue("$t", typeId);
+                cmd.Parameters.AddWithValue("$l", locationId);
+                var raw = await cmd.ExecuteScalarAsync(ct);
+                if (raw is long l)
+                    regionId = (int)l;
+                else if (raw is int i)
+                    regionId = i;
+            }
+
+            await ExecAsync(conn, """
+                DELETE FROM watchlist WHERE type_id = $t AND location_id = $l;
+                DELETE FROM watch_order WHERE type_id = $t AND location_id = $l;
+                """,
+                ("$t", typeId),
+                ("$l", locationId));
+            if (regionId is int rid)
+                await ClearOrdersEtagAsync(conn, rid, typeId);
+        }, ct);
+
+    private static Task ClearOrdersEtagAsync(SqliteConnection conn, int regionId, int typeId) =>
+        ExecAsync(conn,
+            "DELETE FROM esi_etag WHERE cache_key = $k",
+            ("$k", $"orders:{regionId.ToString(CultureInfo.InvariantCulture)}:{typeId.ToString(CultureInfo.InvariantCulture)}"));
 
     public Task<HashSet<(int TypeId, long LocationId)>> WatchKeysAsync(CancellationToken ct = default) =>
         WithAsync(async conn =>

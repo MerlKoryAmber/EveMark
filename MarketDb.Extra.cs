@@ -51,6 +51,7 @@ public sealed partial class MarketDb
                 Math.Clamp(ParseDec(map, "pf_max_market_share", 0.30m), 0, 1),
                 Math.Max(0, ParseLong(map, "pf_min_profit_day", 1_000_000)),
                 Math.Max(0, ParseInt(map, "pf_min_hours", 6)),
+                Math.Max(0, ParseLong(map, "pf_min_volume_day", 10)),
                 Math.Max(0, ParseInt(map, "pf_max_relists_day", 12)),
                 ParseBool(map, "pf_source_jita", true),
                 ParseBool(map, "pf_source_perimeter", true),
@@ -60,7 +61,6 @@ public sealed partial class MarketDb
     public Task SavePortfolioSettingsAsync(PortfolioSettings s, CancellationToken ct = default) =>
         WithAsync(async conn =>
         {
-            var exclude = string.Join(",", (s.Exclude ?? []).Distinct().OrderBy(x => x));
             await UpsertSettingAsync(conn, "pf_capital", s.Capital.ToString(CultureInfo.InvariantCulture));
             await UpsertSettingAsync(conn, "pf_slots_mode",
                 string.Equals(s.SlotsMode, "skills", StringComparison.OrdinalIgnoreCase) ? "skills" : "manual");
@@ -75,10 +75,16 @@ public sealed partial class MarketDb
             await UpsertSettingAsync(conn, "pf_max_market_share", s.MaxMarketShare.ToString(CultureInfo.InvariantCulture));
             await UpsertSettingAsync(conn, "pf_min_profit_day", s.MinProfitDay.ToString(CultureInfo.InvariantCulture));
             await UpsertSettingAsync(conn, "pf_min_hours", s.MinHours.ToString(CultureInfo.InvariantCulture));
+            await UpsertSettingAsync(conn, "pf_min_volume_day", s.MinVolumeDay.ToString(CultureInfo.InvariantCulture));
             await UpsertSettingAsync(conn, "pf_max_relists_day", s.MaxRelistsDay.ToString(CultureInfo.InvariantCulture));
             await UpsertSettingAsync(conn, "pf_source_jita", s.SourceJita ? "1" : "0");
             await UpsertSettingAsync(conn, "pf_source_perimeter", s.SourcePerimeter ? "1" : "0");
-            await UpsertSettingAsync(conn, "pf_exclude", exclude);
+            // Exclude только через SetPortfolioExcludeAsync — иначе «Подобрать»/сохранение настроек затирает список.
+            if (s.Exclude != null)
+            {
+                await UpsertSettingAsync(conn, "pf_exclude",
+                    string.Join(",", s.Exclude.Distinct().OrderBy(x => x)));
+            }
         }, ct);
 
     public Task SetPortfolioExcludeAsync(int typeId, bool excluded, CancellationToken ct = default) =>

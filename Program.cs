@@ -146,6 +146,7 @@ internal static class Program
             decimal? maxMarketShare,
             long? minProfitDay,
             int? minHours,
+            long? minVolumeDay,
             int? maxRelistsDay,
             bool? jita,
             bool? perimeter,
@@ -167,6 +168,7 @@ internal static class Program
                 MaxMarketShare = maxMarketShare ?? saved.MaxMarketShare,
                 MinProfitDay = minProfitDay ?? saved.MinProfitDay,
                 MinHours = minHours ?? saved.MinHours,
+                MinVolumeDay = minVolumeDay ?? saved.MinVolumeDay,
                 MaxRelistsDay = maxRelistsDay ?? saved.MaxRelistsDay,
                 SourceJita = jita ?? saved.SourceJita,
                 SourcePerimeter = perimeter ?? saved.SourcePerimeter
@@ -391,6 +393,8 @@ internal static class Program
             string? marginThenMin,
             string? marginThenMax,
             string? thin,
+            string? netMarginIskMin,
+            string? netMarginIskMax,
             CancellationToken ct) =>
             db.GetSignalsAsync(
                 page ?? 1,
@@ -418,7 +422,8 @@ internal static class Program
                     default,
                     default,
                     default,
-                    default),
+                    default,
+                    NumRange.Parse(netMarginIskMin, netMarginIskMax)),
                 ct));
         app.MapGet("/api/haul", (
             MarketDb db,
