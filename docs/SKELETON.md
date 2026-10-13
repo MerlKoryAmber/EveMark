@@ -40,10 +40,10 @@
 - **Развоз** — отдельный раздел. В `location_quote` sell от 500 тыс. ISK. Только выгодные мгновенные связки A→B (в скупку, без брокерской). Колонки «Выставить» / «Маржа выст.» — лучший sell на месте назначения и маржа с брокерской и налогом. «Объём/сутки» — вчерашняя история ESI региона назначения (не Forge всегда). Хабы: Jita, Perimeter, Amarr, Dodixie, Rens, Hek. Прыжки из ESI route, м³/шт из universe/types. `daily_history` / `history_sync` ключ `(region_id, type_id)`.
 - В базе по типу на доске: лучшая покупка = max buy, лучшая продажа = min sell.
 - Объём и число ордеров — внутри 1% от лучшей цены. Покупка: цена ≥ bestBuy×0.99. Продажа: цена ≤ bestSell×1.01.
-- Продажа дешевле 1 000 000 ISK не пишется.
-- Объём/сутки на закупе = **медиана** ESI The Forge за до 7 полных дней; оценка = маржа × min(медиана×доля_захвата, полосы 1%). Доля = 1/число уникальных order_id из `price_mover` за ~6 ч (иначе max ордеров в полосе). Станционный объём 24ч — `watch_fill`. Watchlist: таблицы `watchlist`, `watch_order`, `watch_fill`, `price_mover`, `esi_etag`. API: `GET|POST|DELETE /api/watch`, `POST /api/watch/poll`.
+- Пороги sell при съёме из `setting`: `min_sell_price` (закуп, по умолчанию 1e6), `min_haul_sell_price` (развоз, по умолчанию 5e5). Настраиваются в UI.
+- Объём/сутки на закупе = **медиана** ESI The Forge за до 7 полных дней; оценка = маржа × min(медиана×доля_захвата, полосы 1%). Доля = 1/число уникальных order_id из `price_mover` за ~6 ч (иначе max ордеров в полосе). Станционный объём 24ч — `watch_fill`. Watchlist: таблицы `watchlist`, `watch_order`, `watch_fill`, `price_mover`, `esi_etag`. API: `GET|POST|DELETE /api/watch`, `POST /api/watch/batch`, `POST /api/watch/poll`. На закупе и в портфеле — чекбоксы строк + кнопка «В слежение» (пакет на Jita 4-4); ручной typeId на вкладке Слежение остаётся.
 - Имена: sync тянет ESI `/universe/names` для типов закупа и развоза без имени или с заглушкой `#id`. Пока имени нет — в таблице `#typeId`, не голый номер.
-- Часы — подряд идущие снимки с маржой > 0 и обеими сторонами ≥ 2 шт. Разрыв > 90 минут рвёт серию.
+- Часы — длительность серии живой вилки по `taken_at` (floor часов от свежего до старого): маржа > 0, обе стороны ≥ 2 шт.; разрыв > **3 ч** (`SignalRule.MaxHoursGap`) рвёт — запас на падение/рестарт. Не число волн (пять съёмов за 10 мин → 0). Дёргают/сжатие по-прежнему шаг ≤ 90 мин.
 - Доска не показывает маржу выше 5 000% от покупки. Кнопка «Столбцы» на закупе и в сигнале прячет столбец вместе с фильтром. Выбор хранится в браузере.
 - Таблица не шире окна. Предмет стоит на месте, остальные столбцы едут по нижней полосе.
 - Деньги в UI целыми ISK. Объёмы, часы и проценты — как есть. В полях от/до у денег и объёмов те же группы разрядов, что в столбце. Процент в фильтре как на экране: 5 = 5%. Фильтр от/до, пустая граница не режет. Страница 200.
@@ -67,13 +67,18 @@
 Шарик трея только когда есть Крик. У заголовков столбцов в сигнале подсказка при наведении, простым языком. Ссылка на предмет: `https://evetycoon.com/market/{typeId}`, карточка EveTycoon.
 
 ## Что не грузится
-`reject.reason`: `cosmetic` (одежда, краски, скины, ящики с ними), `no_trade` (история без сделок). Старые скины могут лежать как `skin`. `Unreject` снимает только `no_trade`.
+`reject.reason`: `cosmetic`, `special_edition`, `blueprint` (галочки в Настройках, по умолчанию все вкл.), `no_trade` (история без сделок). Старые скины могут лежать как `skin`. `Unreject` снимает только `no_trade`. Сохранение настроек пересобирает name-фильтры.
 
-Украшение (`CollectorService.IsCosmetic`): имя содержит ` SKIN`; начинается с `Men's ` / `Women's ` / `Camo`; содержит `Apparel` или `Cybernetic Arm`; отдельное слово Jacket, Boots, Suit, Beret, Goggles, Glasses, Mask, Outfit, Scarf, Shoes, Hoodie, Shirt, Pants, Dress, Skirt, Blouse, T-Shirt, Camo, Pattern, Patterns. Не режутся Target Painter, Cap Recharger, Coating, Sequencer, Yellowjacket, Suite, Boots.ini.
+- `IsCosmetic`: ` SKIN`; Men's/Women's; Apparel; Camo…; слова Jacket, Boots, Suit…
+- `IsSpecialEdition` (категория ESI 63): `Special Edition`; `Tournament Card`; префикс `NEO YC`; датированный `YC1xx.` (не строка «Special Edition Assets» в имени — её у типов нет)
+- `IsBlueprint`: имя содержит `Blueprint`
 
 ## База
 SQLite WAL. Деньги в TEXT. Таблицы: `snapshot`, `quote`, `type_name`, `daily_history`, `history_sync`, `setting`, `reject`, `status`, `location_*`, `watchlist`, `watch_order`, `watch_fill`, `price_mover`, `esi_etag`. Срок хранения 1–400 дней, по умолчанию 120 (`setting.keep_days`). Чистка после снимка без VACUUM. Сохранение настроек чистит и делает VACUUM.
 
 ## API
-`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`, `POST /api/haul/pack`, `POST /api/portfolio`, `GET /api/contracts`, `GET|POST /api/notes`, `GET /api/backtest/shout`, `POST /api/refine`, `GET /api/refine/ores`, `GET|POST|DELETE /api/watch`, `POST /api/watch/poll`.
-Файлы: `Portfolio.cs`, `HaulPro.cs`, `Anomaly.cs`, `Refine.cs`, `MarketDb.Extra.cs`.
+`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`, `GET /api/haul/trips`, `GET /api/haul/trip`, `GET|POST /api/haul/settings`, `POST /api/haul/pack` (старый рюкзак), `GET /api/portfolio`, `GET /api/contracts`, `GET|POST /api/notes`, `GET /api/backtest/shout`, `POST /api/refine`, `GET /api/refine/ores`, `GET|POST|DELETE /api/watch`, `POST /api/watch/batch`, `POST /api/watch/poll`.
+Файлы: `Portfolio.cs`, `HaulTrip.cs`, `HaulPro.cs`, `Anomaly.cs`, `Refine.cs`, `MarketDb.Extra.cs`, `MarketDb.HaulTrip.cs`.
+Портфель (ТЗ): кандидаты с доски закупа; оптимизатор лагранж+trim; `pf_*`; `--test-portfolio`.
+Развоз «Рейс» (ТЗ `HAULING_SPEC`): подвкладка рядом с доской; `hl_*`; лоты instant/list/best из `location_quote` (полного стакана нет); глубина = touch; `best_sell_issued`/`best_buy_issued`. List: sell_post = min(ask−tick, max avg истории `hl_list_hist_days`=14, мин. best_sell других хабов); ask старше `hl_list_max_ask_age_days`=7 — только история; V_B≥10, ≥3 sell, вилка≤2×, sell≤2×ask; `days_to_sell`≤горизонт; skip reject; жадный §5.2; `--test-haul`. UI: «Возраст ask», поля возраста/истории в «прочее»; меню столбцов доски не трогает рейс.
+Навигация: Закуп · Сигнал · Портфель · Развоз · Слежение · Ещё · Настройки.

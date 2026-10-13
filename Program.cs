@@ -7,6 +7,18 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Any(a => string.Equals(a, "--test-portfolio", StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine(PortfolioSelfTest.Run());
+            return;
+        }
+
+        if (args.Any(a => string.Equals(a, "--test-haul", StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine(HaulSelfTest.Run());
+            return;
+        }
+
         ApplicationConfiguration.Initialize();
         var home = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
         var dbPath = Path.Combine(home, "data", "jita.db");
@@ -40,7 +52,9 @@ internal static class Program
         builder.Services.AddHostedService(sp => sp.GetRequiredService<WatchPollService>());
 
         var app = builder.Build();
-        app.Services.GetRequiredService<MarketDb>().InitAsync().GetAwaiter().GetResult();
+        var dbBoot = app.Services.GetRequiredService<MarketDb>();
+        dbBoot.InitAsync().GetAwaiter().GetResult();
+        dbBoot.EnsureHaulTablesAsync().GetAwaiter().GetResult();
 
         app.UseDefaultFiles();
         app.UseStaticFiles();
@@ -67,7 +81,7 @@ internal static class Program
             };
         });
         app.MapGet("/api/settings", (MarketDb db, CancellationToken ct) => db.GetSettingsAsync(ct));
-        app.MapPost("/api/settings", async (FeeSettings input, MarketDb db, CancellationToken ct) =>
+        app.MapPost("/api/settings", async (FeeSettings input, MarketDb db, CollectorService collector, CancellationToken ct) =>
         {
             if (input.Accounting is < 0 or > 5 || input.BrokerRelations is < 0 or > 5)
                 return Results.BadRequest(new { error = "Скиллы от 0 до 5" });
@@ -75,7 +89,10 @@ internal static class Program
                 return Results.BadRequest(new { error = "Стендинг от −10 до 10" });
             if (input.KeepDays is < 1 or > 400)
                 return Results.BadRequest(new { error = "Срок хранения от 1 до 400 дней" });
+            if (input.MinSellPrice < 0 || input.MinHaulSellPrice < 0)
+                return Results.BadRequest(new { error = "Пороги цен ≥ 0" });
             await db.SaveSettingsAsync(input, ct);
+            await collector.ApplyNameFiltersAsync(input, ct);
             await db.PurgeAsync(input.KeepDays, shrink: true, ct);
             return Results.Ok(await db.GetSettingsAsync(ct));
         });
@@ -93,6 +110,17 @@ internal static class Program
             await db.AddWatchAsync(body.TypeId, body.LocationId, body.RegionId, body.Note, ct);
             return Results.Ok(await db.ListWatchAsync(ct));
         });
+        app.MapPost("/api/watch/batch", async (WatchBatchRequest body, MarketDb db, CancellationToken ct) =>
+        {
+            if (body.LocationId <= 0 || body.RegionId <= 0)
+                return Results.BadRequest(new { error = "Нужны locationId, regionId" });
+            var ids = (body.TypeIds ?? []).Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0)
+                return Results.BadRequest(new { error = "Пустой список typeIds" });
+            foreach (var id in ids)
+                await db.AddWatchAsync(id, body.LocationId, body.RegionId, body.Note, ct);
+            return Results.Ok(new { added = ids.Count, items = await db.ListWatchAsync(ct) });
+        });
         app.MapDelete("/api/watch", async (int typeId, long locationId, MarketDb db, CancellationToken ct) =>
         {
             await db.RemoveWatchAsync(typeId, locationId, ct);
@@ -103,13 +131,129 @@ internal static class Program
             await poll.PollOnceAsync(ct);
             return Results.Accepted();
         });
-        app.MapPost("/api/portfolio", async (PortfolioRequest body, MarketDb db, CancellationToken ct) =>
+        app.MapGet("/api/portfolio", async (
+            MarketDb db,
+            long? capital,
+            string? slotsMode,
+            int? slots,
+            int? skillTrade,
+            int? skillRetail,
+            int? skillWholesale,
+            int? skillTycoon,
+            int? slotsUsed,
+            decimal? horizonDays,
+            decimal? maxShareItem,
+            decimal? maxMarketShare,
+            long? minProfitDay,
+            int? minHours,
+            int? maxRelistsDay,
+            bool? jita,
+            bool? perimeter,
+            CancellationToken ct) =>
         {
-            if (body.Capital < 0)
-                return Results.BadRequest(new { error = "Капитал ≥ 0" });
-            var rows = await db.LoadBoardRowsAsync(BoardSources.Both, ct);
+            var saved = await db.GetPortfolioSettingsAsync(ct);
+            var settings = saved with
+            {
+                Capital = capital ?? saved.Capital,
+                SlotsMode = slotsMode ?? saved.SlotsMode,
+                Slots = slots ?? saved.Slots,
+                SkillTrade = skillTrade ?? saved.SkillTrade,
+                SkillRetail = skillRetail ?? saved.SkillRetail,
+                SkillWholesale = skillWholesale ?? saved.SkillWholesale,
+                SkillTycoon = skillTycoon ?? saved.SkillTycoon,
+                SlotsUsed = slotsUsed ?? saved.SlotsUsed,
+                HorizonDays = horizonDays ?? saved.HorizonDays,
+                MaxShareItem = maxShareItem ?? saved.MaxShareItem,
+                MaxMarketShare = maxMarketShare ?? saved.MaxMarketShare,
+                MinProfitDay = minProfitDay ?? saved.MinProfitDay,
+                MinHours = minHours ?? saved.MinHours,
+                MaxRelistsDay = maxRelistsDay ?? saved.MaxRelistsDay,
+                SourceJita = jita ?? saved.SourceJita,
+                SourcePerimeter = perimeter ?? saved.SourcePerimeter
+            };
+            if (!settings.SourceJita && !settings.SourcePerimeter)
+                return Results.BadRequest(new { error = "Включите Jita или Perimeter" });
             var fees = await db.GetSettingsAsync(ct);
-            return Results.Ok(PortfolioBuilder.Build(body with { MaxItems = body.MaxItems <= 0 ? 40 : body.MaxItems }, rows, fees.BrokerFee));
+            var sourced = new List<(BoardRow Row, string Location)>();
+            if (settings.SourceJita)
+            {
+                var rows = await db.LoadBoardRowsAsync(new BoardSources(true, false), ct);
+                sourced.AddRange(rows.Select(r => (r, "jita")));
+            }
+
+            if (settings.SourcePerimeter)
+            {
+                var rows = await db.LoadBoardRowsAsync(new BoardSources(false, true), ct);
+                sourced.AddRange(rows.Select(r => (r, "perimeter")));
+            }
+
+            var taken = await db.GetLastSnapshotUtcAsync(ct);
+            var stamp = taken?.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+            return Results.Ok(PortfolioBuilder.Build(settings, sourced, fees.BrokerFee, stamp));
+        });
+        app.MapPost("/api/portfolio/settings", async (PortfolioSettings body, MarketDb db, CancellationToken ct) =>
+        {
+            if (body.Capital < 0 || body.Slots < 0 || body.SlotsUsed < 0)
+                return Results.BadRequest(new { error = "Капитал и слоты ≥ 0" });
+            if (body.HorizonDays <= 0 || body.HorizonDays > 30)
+                return Results.BadRequest(new { error = "Горизонт 0…30 суток" });
+            await db.SavePortfolioSettingsAsync(body, ct);
+            return Results.Ok(await db.GetPortfolioSettingsAsync(ct));
+        });
+        app.MapPost("/api/portfolio/exclude", async (PortfolioExcludeRequest body, MarketDb db, CancellationToken ct) =>
+        {
+            if (body.TypeId <= 0)
+                return Results.BadRequest(new { error = "typeId" });
+            await db.SetPortfolioExcludeAsync(body.TypeId, body.Excluded, ct);
+            return Results.Ok(await db.GetPortfolioSettingsAsync(ct));
+        });
+        app.MapGet("/api/haul/settings", (MarketDb db, CancellationToken ct) => db.GetHaulSettingsAsync(ct));
+        app.MapPost("/api/haul/settings", async (HaulSettings body, MarketDb db, CancellationToken ct) =>
+        {
+            if (body.CargoM3 <= 0)
+                return Results.BadRequest(new { error = "Трюм м³" });
+            await db.SaveHaulSettingsAsync(body, ct);
+            return Results.Ok(await db.GetHaulSettingsAsync(ct));
+        });
+        app.MapGet("/api/haul/trips", async (
+            MarketDb db, EsiClient esi, CancellationToken ct,
+            string? from, string? to, string? shipPreset, decimal? cargoM3,
+            long? budget, long? maxCargoValue, string? mode, string? routeFlag,
+            decimal? listHorizonDays, decimal? maxMarketShare, long? minItemProfit,
+            int? secPerJump) =>
+        {
+            var saved = await db.GetHaulSettingsAsync(ct);
+            var s = MergeHaul(saved, from, to, shipPreset, cargoM3, budget, maxCargoValue, mode, routeFlag,
+                listHorizonDays, maxMarketShare, minItemProfit, secPerJump);
+            var dto = await db.BuildHaulTripsAsync(s, esi, includeRowsFor: false, null, null, ct);
+            return Results.Ok(dto);
+        });
+        app.MapGet("/api/haul/trip", async (
+            MarketDb db, EsiClient esi, CancellationToken ct,
+            string from, string to, string? shipPreset, decimal? cargoM3,
+            long? budget, long? maxCargoValue, string? mode, string? routeFlag,
+            decimal? listHorizonDays, decimal? maxMarketShare, long? minItemProfit,
+            int? secPerJump) =>
+        {
+            if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to))
+                return Results.BadRequest(new { error = "from и to" });
+            var saved = await db.GetHaulSettingsAsync(ct);
+            var s = MergeHaul(saved, from, to, shipPreset, cargoM3, budget, maxCargoValue, mode, routeFlag,
+                listHorizonDays, maxMarketShare, minItemProfit, secPerJump);
+            var dto = await db.BuildHaulTripsAsync(s, esi, includeRowsFor: true, from, to, ct);
+            var trip = dto.Trips.FirstOrDefault();
+            if (trip is null)
+                return Results.Ok(new { dto.SnapshotTime, dto.SnapshotAgeMin, dto.Inputs, trip = (object?)null, multibuy = "", csv = "" });
+            var rows = trip.Rows ?? [];
+            return Results.Ok(new
+            {
+                dto.SnapshotTime,
+                dto.SnapshotAgeMin,
+                dto.Inputs,
+                trip,
+                multibuy = HaulPlanner.Multibuy(rows),
+                csv = HaulPlanner.Csv(rows)
+            });
         });
         app.MapPost("/api/haul/pack", async (HaulPackRequest body, MarketDb db, EsiClient esi, CancellationToken ct) =>
         {
@@ -394,7 +538,35 @@ internal static class Program
     }
 
     private sealed record WatchAddRequest(int TypeId, long LocationId, int RegionId, string? Note);
+    private sealed record WatchBatchRequest(IReadOnlyList<int>? TypeIds, long LocationId, int RegionId, string? Note);
     private sealed record NoteRequest(int TypeId, string? Note, bool? Blacklisted);
+
+    private static HaulSettings MergeHaul(
+        HaulSettings saved,
+        string? from, string? to, string? shipPreset, decimal? cargoM3,
+        long? budget, long? maxCargoValue, string? mode, string? routeFlag,
+        decimal? listHorizonDays, decimal? maxMarketShare, long? minItemProfit, int? secPerJump)
+    {
+        var preset = shipPreset ?? saved.ShipPreset;
+        var cargo = cargoM3 ?? saved.CargoM3;
+        if (cargoM3 is null && shipPreset is not null && HaulSettings.PresetM3(preset) > 0)
+            cargo = HaulSettings.PresetM3(preset);
+        return saved with
+        {
+            From = from ?? saved.From,
+            To = to ?? saved.To,
+            ShipPreset = preset,
+            CargoM3 = cargo,
+            Budget = budget ?? saved.Budget,
+            MaxCargoValue = maxCargoValue ?? saved.MaxCargoValue,
+            Mode = mode ?? saved.Mode,
+            RouteFlag = routeFlag ?? saved.RouteFlag,
+            ListHorizonDays = listHorizonDays ?? saved.ListHorizonDays,
+            MaxMarketShare = maxMarketShare ?? saved.MaxMarketShare,
+            MinItemProfit = minItemProfit ?? saved.MinItemProfit,
+            SecPerJump = secPerJump ?? saved.SecPerJump
+        };
+    }
 
     private static int? SystemForLocation(long locationId, string? name)
     {

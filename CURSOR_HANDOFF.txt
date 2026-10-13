@@ -4,7 +4,7 @@ MK Jitawatch — локальный стол. Exe: JitaWatch.exe. Карта: do
 Каталог: C:\Code\jita-watch
 Живой: publish\JitaWatch.exe, http://127.0.0.1:8741, data\jita.db
 
-Сейчас: wishlist-волна в коде — портфель, haul pack (secure/ганк/курьерка/multibuy/CSV), контракты, аномалии/нетто, notes/blacklist, бэктест Крик, мини-рефайн, UI + OPISANIE. Приёмки нет.
-Хвост: ESI history 400 type 62593; полный SDE; SSO цитадели; точный бэктест; Ahbazon id уточнить.
+Сейчас: портфель по ТЗ OK; развоз «Рейс» — list: issued/возраст, история, потолок соседних хабов; UI hl_ask_age/hist; touch; days≤горизонт. Приёмки нет.
+Хвост: ESI history 400 type 62593; полный SDE; SSO цитадели; точный бэктест; Ahbazon id; OrTools LP §5.1; полный стакан.
 
 Идеи / на потом: rolling 24ч, keep_days осмыслить, графики, полный рефайн.
