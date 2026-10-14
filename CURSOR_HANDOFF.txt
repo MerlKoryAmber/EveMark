@@ -4,7 +4,7 @@ MK Jitawatch — локальный стол. Exe: JitaWatch.exe. Карта: do
 Каталог: C:\Code\jita-watch
 Живой: publish\JitaWatch.exe, http://127.0.0.1:8741, data\jita.db
 
-Сейчас: карточка предмета (probe) по клику на имя — вердикт простым языком + история. Мин. объём портфеля. Приёмки нет.
+Сейчас: probe — покупка/продажа Jita по дням + station_days; сигнал 48 ч. Галка плюсовой маржи. Приёмки нет.
 Хвост аудита: доля портфеля≠movers; Нетто≠сутки; partial RelistCost; Anomaly hist; no_trade rebuild. Ещё: ESI 62593; SDE; SSO; бэктест; OrTools.
 
-Идеи / на потом: rolling 24ч, keep_days осмыслить, графики в карточке, полный рефайн.
+Идеи / на потом: keep_days осмыслить, графики в карточке, полный рефайн.

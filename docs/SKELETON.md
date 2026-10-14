@@ -41,10 +41,12 @@
 - В базе по типу на доске: лучшая покупка = max buy, лучшая продажа = min sell.
 - Объём и число ордеров — внутри 1% от лучшей цены. Покупка: цена ≥ bestBuy×0.99. Продажа: цена ≤ bestSell×1.01.
 - Пороги sell при съёме из `setting`: `min_sell_price` (закуп, по умолчанию 1e6), `min_haul_sell_price` (развоз, по умолчанию 5e5). Настраиваются в UI.
+- Доска Закуп: `board_positive_margin` (по умолчанию вкл.) — скрывать маржу ≤ 0 после комиссий. Только отображение закупа; съём / сигнал / портфель / развоз не трогает.
 - Объём/сутки на закупе = **медиана** ESI The Forge за до 7 полных дней; оценка = маржа × min(медиана×доля_захвата, полосы 1%). Доля = 1/число уникальных order_id из `price_mover` за ~6 ч (иначе max ордеров в полосе). Станционный объём 24ч — `watch_fill`. Watchlist: таблицы `watchlist`, `watch_order`, `watch_fill`, `price_mover`, `esi_etag`. API: `GET|POST|DELETE /api/watch`, `POST /api/watch/batch`, `POST /api/watch/poll`. На закупе и в портфеле — чекбоксы строк + кнопка «В слежение» (пакет на Jita 4-4); ручной typeId на вкладке Слежение остаётся.
 - Имена: sync тянет ESI `/universe/names` для типов закупа и развоза без имени или с заглушкой `#id`. Пока имени нет — в таблице `#typeId`, не голый номер.
-- Часы — длительность серии живой вилки по `taken_at` (floor часов от свежего до старого): маржа > 0, обе стороны ≥ 2 шт.; разрыв > **3 ч** (`SignalRule.MaxHoursGap`) рвёт — запас на падение/рестарт. Не число волн (пять съёмов за 10 мин → 0). Дёргают/сжатие по-прежнему шаг ≤ 90 мин.
-- Доска не показывает маржу выше 5 000% от покупки. Кнопка «Столбцы» на закупе и в сигнале прячет столбец вместе с фильтром. Выбор хранится в браузере.
+- Часы на **закупе** — непрерывная серия живой вилки по `taken_at` (floor часов): маржа > 0, обе стороны ≥ 2 шт.; разрыв > **3 ч** (`SignalRule.MaxHoursGap`) рвёт. Не число волн.
+- Часы в **сигнале** — скользящее окно **48 ч** (`SignalRule.Lookback`): мёртвая вилка рвёт, простой без снимков (ПК выключен) — нет; потолок 48. Ранний баннер считает снимки за те же 48 ч. Средняя в сигнале — VWAP ESI Forge за до **2** полных дней (`SignalRule.AverageDays`). Дёргают/сжатие по-прежнему шаг ≤ 90 мин.
+- Доска не показывает маржу выше 5 000% от покупки (жёстко). Плюсовая маржа — галка в Настройках (`board_positive_margin`). Кнопка «Столбцы» на закупе и в сигнале прячет столбец вместе с фильтром. Выбор хранится в браузере.
 - Таблица не шире окна. Предмет стоит на месте, остальные столбцы едут по нижней полосе.
 - Деньги в UI целыми ISK. Объёмы, часы и проценты — как есть. В полях от/до у денег и объёмов те же группы разрядов, что в столбце. Процент в фильтре как на экране: 5 = 5%. Фильтр от/до, пустая граница не режет. Страница 200.
 - Перестановок: сколько раз можно опустить продажу, пока кончится маржа с единицы. Формула EVE при Advanced Broker Relations 0: 50% × брокерская × цена продажи. Рост цены и минимум 100 ISK за приказ в это число не входят.
@@ -55,11 +57,11 @@
 Налог 7.5%×(1−0.11×Accounting). Брокер 3%−0.3%×BrokerRelations−0.03%×фракция−0.02%×корп, пол 1%. По умолчанию Accounting V, Broker Relations V, стендинги 0. Хранятся в `setting`. Маржа = sell×(1−брокер−налог) − buy×(1+брокер). Перестановка в маржу не входит.
 
 ## Сигналы
-Общий вход: маржа после комиссий 3–100%, вчерашний объём ≥ 10.
+Общий вход: маржа после комиссий 3–100%, объём/сутки (медиана) ≥ 10.
 
 | Раздел | Условие |
 |--------|---------|
-| Крик | ≥ 6 снимков, часы ≥ 6, оценка ≥ 10 млн, вчерашняя средняя внутри спреда. Тонко: «покупка», если buy×2 < sell; «продажа», если sell×2 < buy |
+| Крик | ≥ 6 снимков за 48 ч, часы ≥ 6 в окне 48 ч, оценка ≥ 10 млн, средняя 1–2 дня ESI внутри спреда. Тонко: «покупка», если buy×2 < sell; «продажа», если sell×2 < buy |
 | Мимо цены | Те же ворота, средняя вне спреда |
 | Дёргают | ≥ 4 снимка. Лучшая покупка или продажа менялась каждый шаг, серия ≥ 3, смотрим до 5 шагов, разрыв ≤ 90 минут |
 | Сжимается | Маржа > 0 и строго падает 3 часа подряд. «Маржа была» — маржа в начале падения |
@@ -77,7 +79,7 @@
 SQLite WAL. Деньги в TEXT. Таблицы: `snapshot`, `quote`, `type_name`, `daily_history`, `history_sync`, `setting`, `reject`, `status`, `location_*`, `watchlist`, `watch_order`, `watch_fill`, `price_mover`, `esi_etag`. Срок хранения 1–400 дней, по умолчанию 120 (`setting.keep_days`). Чистка после снимка без VACUUM. Сохранение настроек чистит и делает VACUUM.
 
 ## API
-`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`, `GET /api/haul/trips`, `GET /api/haul/trip`, `GET|POST /api/haul/settings`, `POST /api/haul/pack` (старый рюкзак), `GET /api/portfolio`, `GET /api/type/{id}/probe` (карточка предмета: история и простой вердикт), `GET /api/contracts`, `GET|POST /api/notes`, `GET /api/backtest/shout`, `POST /api/refine`, `GET /api/refine/ores`, `GET|POST|DELETE /api/watch`, `POST /api/watch/batch`, `POST /api/watch/poll`.
+`GET /api/status`, `GET|POST /api/settings`, `POST /api/collect`, `GET /api/recommendations`, `GET /api/signals`, `GET /api/haul`, `GET /api/haul/trips`, `GET /api/haul/trip`, `GET|POST /api/haul/settings`, `POST /api/haul/pack` (старый рюкзак), `GET /api/portfolio`, `GET /api/type/{id}/probe` (карточка: вердикт; `quotes` покупка/продажа Jita по дням; `history` ESI; `station_days` buy/sell при слежении), `GET /api/contracts`, `GET|POST /api/notes`, `GET /api/backtest/shout`, `POST /api/refine`, `GET /api/refine/ores`, `GET|POST|DELETE /api/watch`, `POST /api/watch/batch`, `POST /api/watch/poll`.
 Файлы: `Portfolio.cs`, `HaulTrip.cs`, `HaulPro.cs`, `Anomaly.cs`, `Refine.cs`, `MarketDb.Extra.cs`, `MarketDb.HaulTrip.cs`.
 Портфель (ТЗ): кандидаты с доски закупа; оптимизатор лагранж+trim; `pf_*` (в т.ч. `pf_min_volume_day`, по умолчанию 10 — медиана объёма/сутки); `--test-portfolio`.
 Развоз «Рейс» (ТЗ `HAULING_SPEC`): подвкладка рядом с доской; `hl_*`; лоты instant/list/best из `location_quote` (полного стакана нет); глубина = touch; `best_sell_issued`/`best_buy_issued`. List: sell_post = min(ask−tick, max avg истории `hl_list_hist_days`=14, мин. best_sell хабов кроме A и B); ask старше `hl_list_max_ask_age_days`=7 — ask не якорь, остаётся min(история, те же соседи); V_B≥10, ≥3 sell, вилка≤2×, sell≤2×ask; `days_to_sell`≤горизонт; skip reject; жадный §5.2; `--test-haul`. UI: «Возраст ask», поля возраста/истории в «прочее»; меню столбцов доски не трогает рейс.

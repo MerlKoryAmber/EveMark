@@ -143,7 +143,9 @@ public sealed partial class MarketDb
         WithAsync(async conn =>
         {
             var load = await LoadRankedAsync(conn, sources, ct);
+            // Портфель всегда только плюсовая маржа — галка закупа сюда не тянется.
             var rows = load.Rows
+                .Where(r => r.MarginIsk > 0)
                 .Where(r => r.MarginFrac * 100m <= 5000m)
                 .Where(r => !IsBlacklisted(conn, r.TypeId))
                 .ToList();
@@ -384,24 +386,85 @@ public sealed partial class MarketDb
                 watched = await w.ExecuteScalarAsync(ct) is not null and not DBNull;
             }
 
+            var stationDays = new List<TypeProbeStationDay>();
             if (watched)
             {
-                var since = Stamp(DateTime.UtcNow.AddHours(-24));
-                await using var f = conn.CreateCommand();
-                f.CommandText = """
-                    SELECT is_buy, SUM(volume) FROM watch_fill
-                    WHERE type_id = $t AND filled_at >= $since
-                    GROUP BY is_buy
+                var since24 = Stamp(DateTime.UtcNow.AddHours(-24));
+                await using (var f = conn.CreateCommand())
+                {
+                    f.CommandText = """
+                        SELECT is_buy, SUM(volume) FROM watch_fill
+                        WHERE type_id = $t AND filled_at >= $since
+                        GROUP BY is_buy
+                        """;
+                    f.Parameters.AddWithValue("$t", typeId);
+                    f.Parameters.AddWithValue("$since", since24);
+                    await using var reader = await f.ExecuteReaderAsync(ct);
+                    while (await reader.ReadAsync(ct))
+                    {
+                        var isBuy = reader.GetInt64(0) != 0;
+                        var vol = ReadLong(reader, 1);
+                        if (isBuy) stationBuy = vol;
+                        else stationSell = vol;
+                    }
+                }
+
+                var sinceDays = Stamp(DateTime.UtcNow.AddDays(-days));
+                var byDay = new Dictionary<string, (long Buy, long Sell)>(StringComparer.Ordinal);
+                await using (var f = conn.CreateCommand())
+                {
+                    f.CommandText = """
+                        SELECT substr(filled_at, 1, 10), is_buy, SUM(volume)
+                        FROM watch_fill
+                        WHERE type_id = $t AND filled_at >= $since
+                        GROUP BY substr(filled_at, 1, 10), is_buy
+                        ORDER BY 1 DESC
+                        """;
+                    f.Parameters.AddWithValue("$t", typeId);
+                    f.Parameters.AddWithValue("$since", sinceDays);
+                    await using var reader = await f.ExecuteReaderAsync(ct);
+                    while (await reader.ReadAsync(ct))
+                    {
+                        var day = reader.GetString(0);
+                        var isBuy = reader.GetInt64(1) != 0;
+                        var vol = ReadLong(reader, 2);
+                        byDay.TryGetValue(day, out var cur);
+                        byDay[day] = isBuy ? (cur.Buy + vol, cur.Sell) : (cur.Buy, cur.Sell + vol);
+                    }
+                }
+
+                foreach (var day in byDay.Keys.OrderByDescending(d => d, StringComparer.Ordinal))
+                {
+                    var (dayBuy, daySell) = byDay[day];
+                    stationDays.Add(new TypeProbeStationDay(day, dayBuy, daySell));
+                }
+            }
+
+            // Последний снимок Jita на каждый UTC-день — покупка и продажа рядом.
+            var quoteDays = new List<TypeProbeQuoteDay>();
+            var quoteFrom = Stamp(DateTime.UtcNow.AddDays(-days));
+            await using (var q = conn.CreateCommand())
+            {
+                q.CommandText = """
+                    SELECT substr(s.taken_at, 1, 10) AS day, lq.best_buy, lq.best_sell
+                    FROM location_quote lq
+                    JOIN snapshot s ON s.id = lq.snapshot_id
+                    WHERE lq.type_id = $t AND lq.location_id = $loc AND s.taken_at >= $from
+                    ORDER BY s.taken_at DESC
                     """;
-                f.Parameters.AddWithValue("$t", typeId);
-                f.Parameters.AddWithValue("$since", since);
-                await using var reader = await f.ExecuteReaderAsync(ct);
+                q.Parameters.AddWithValue("$t", typeId);
+                q.Parameters.AddWithValue("$loc", TradeHubs.Jita.LocationId);
+                q.Parameters.AddWithValue("$from", quoteFrom);
+                await using var reader = await q.ExecuteReaderAsync(ct);
+                var seen = new HashSet<string>(StringComparer.Ordinal);
                 while (await reader.ReadAsync(ct))
                 {
-                    var isBuy = reader.GetInt64(0) != 0;
-                    var vol = ReadLong(reader, 1);
-                    if (isBuy) stationBuy = vol;
-                    else stationSell = vol;
+                    var day = reader.GetString(0);
+                    if (!seen.Add(day))
+                        continue;
+                    decimal? dayBuy = reader.IsDBNull(1) ? null : ReadDec(reader, 1);
+                    var daySell = ReadDec(reader, 2);
+                    quoteDays.Add(new TypeProbeQuoteDay(day, dayBuy, daySell));
                 }
             }
 
@@ -411,11 +474,21 @@ public sealed partial class MarketDb
                 bestBuy, bestSell, margin, marginFrac, hours,
                 buyTouch, sellTouch, buyVol, sellVol,
                 lastDay, lastAvg, lastVol, avgPlace, verdict,
-                watched, stationBuy, stationSell, bars);
+                watched, stationBuy, stationSell, bars, quoteDays, stationDays);
         }, ct);
 }
 
 public sealed record TypeProbeDay(string Day, long Volume, decimal Average, decimal Highest, decimal Lowest);
+
+public sealed record TypeProbeQuoteDay(
+    string Day,
+    [property: JsonPropertyName("best_buy")] decimal? BestBuy,
+    [property: JsonPropertyName("best_sell")] decimal BestSell);
+
+public sealed record TypeProbeStationDay(
+    string Day,
+    [property: JsonPropertyName("buy")] long Buy,
+    [property: JsonPropertyName("sell")] long Sell);
 
 public sealed record TypeProbeDto(
     int TypeId,
@@ -440,4 +513,6 @@ public sealed record TypeProbeDto(
     bool Watched,
     [property: JsonPropertyName("station_buy_24h")] long? StationBuy24h,
     [property: JsonPropertyName("station_sell_24h")] long? StationSell24h,
-    IReadOnlyList<TypeProbeDay> History);
+    IReadOnlyList<TypeProbeDay> History,
+    [property: JsonPropertyName("quotes")] IReadOnlyList<TypeProbeQuoteDay> Quotes,
+    [property: JsonPropertyName("station_days")] IReadOnlyList<TypeProbeStationDay> StationDays);

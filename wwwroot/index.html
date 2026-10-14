@@ -1209,6 +1209,15 @@
             </div>
           </div>
           <div class="panel-strip">
+            <h3>Доска закупа</h3>
+            <p>Только отображение таблицы Закуп. Съём, сигнал, портфель и развоз эта галка не меняет.</p>
+            <div class="fields-check">
+              <label class="field" title="Скрывать строки, где маржа после налога и брокера ≤ 0. Сняли — на закупе видны и минусовые вилки.">
+                <input id="board-positive-margin" type="checkbox" checked> Только плюсовая маржа
+              </label>
+            </div>
+          </div>
+          <div class="panel-strip">
             <h3>База</h3>
             <p>Снимки и дневная история старше срока удаляются. Сохранение ещё и ужимает файл. Журнал — до 2 МБ.</p>
             <div class="fields">
@@ -1361,9 +1370,9 @@
       captureShare: "Доля захвата: 1 / конкуренты. Оценка не забирает весь дневной объём одному.",
       stationVolume24h: "Сделки на станции за 24 ч по дельте volume_remain (только типы из слежения).",
       dailyIsk: "Маржа × min(медиана7д × доля захвата, глубина полос 1%).",
-      hours: "Сколько часов подряд разница цен держалась, и с обеих сторон было хотя бы две штуки. Пропуск больше полутора часов обнуляет счёт.",
+      hours: "В сигнале — сколько часов вилка была жива в скользящих 48 ч (простой ПК не рвёт; мёртвая вилка рвёт). На закупе — непрерывная серия, разрыв больше 3 ч обнуляет.",
       thin: "Какой стороны мало. «покупка» — купить легко, продать труднее: желающих купить вдвое меньше. «продажа» — наоборот. Пустая ячейка — стороны примерно равны.",
-      average: "Средняя цена вчерашних сделок по The Forge. В этом списке она не между текущей покупкой и продажей: вчера торговали заметно иначе, чем вилка сейчас.",
+      average: "Средняя цена сделок The Forge за 1–2 полных дня ESI (взвешенная по объёму). В «Мимо цены» она вне текущего спреда.",
       buyMoves: "Сколько последних часов подряд менялась лучшая цена покупки. Чем больше, тем чаще придётся переставлять свой ордер.",
       sellMoves: "Сколько последних часов подряд менялась лучшая цена продажи.",
       marginThen: "Маржа с одной штуки три часа назад, до начала падения. Сравни с текущей маржей.",
@@ -1430,7 +1439,7 @@
     const signalViews = {
       shout: {
         sort: "dailyIsk", dir: -1,
-        hint: "Маржа 3–100%. Вчера от 10 шт. Средняя вчера между покупкой и продажей. Обе стороны от 2 шт, так 6 часов. Оценка от 10 млн.",
+        hint: "Маржа 3–100%. Объём/сутки (медиана) от 10 шт. Средняя за 1–2 дня ESI внутри спреда. Часов ≥ 6 в окне 48 ч (простой ПК не рвёт). Оценка от 10 млн.",
         cols: [
           ["name", "Предмет", "text"],
           ["bestBuy", "Покупка", "isk", "money"],
@@ -1446,12 +1455,12 @@
       },
       off: {
         sort: "dailyIsk", dir: -1,
-        hint: "Те же пороги, но вчерашняя средняя цена вне спреда.",
+        hint: "Те же пороги, но средняя за 1–2 дня ESI вне спреда.",
         cols: [
           ["name", "Предмет", "text"],
           ["bestBuy", "Покупка", "isk", "money"],
           ["bestSell", "Продажа", "isk", "money"],
-          ["average", "Вчера", "isk", "money"],
+          ["average", "Средняя", "isk", "money"],
           ["marginIsk", "Маржа", "isk", "money"],
           ["marginFrac", "%", "pct", "pct"],
           ["dailyVolume", "Объём/сутки", "num", "compact"],
@@ -1596,16 +1605,54 @@
           html += `<p class="panel-actions" style="margin:0 0 12px">`
             + `<button type="button" class="btn btn-secondary" disabled>Уже в слежении</button></p>`;
         } else {
-          html += `<p class="probe-meta">Не в слежении — сделки на станции за сутки не считаются. `
+          html += `<p class="probe-meta">Не в слежении — сделки на станции по дням не считаются. `
             + `Кнопка ниже добавит предмет на Jita 4-4.</p>`;
           html += `<p class="panel-actions" style="margin:0 0 12px">`
             + `<button type="button" class="btn" id="probe-watch-add" data-t="${id}">В слежение (Jita 4-4)</button>`
             + `<span class="form-msg" id="probe-watch-msg" style="margin:0"></span></p>`;
         }
         html += `<p class="probe-meta"><a href="https://evetycoon.com/market/${id}" target="_blank" rel="noopener">Открыть карточку на EveTycoon</a></p>`;
-        html += `<p class="probe-meta" style="margin-top:12px">Дни в регионе (новые сверху). Средняя — по всем сделкам дня, не только по «лучшей» цене.</p>`;
+
+        html += `<p class="probe-meta" style="margin-top:12px"><b>Цены</b> на Jita 4-4 по дням (ISK, не штуки). Последний снимок дня: лучшая покупка и лучшая продажа.</p>`;
         html += `<table class="probe-table"><thead><tr>`
-          + `<th>День</th><th>Штук</th><th>Средняя</th><th>Мин</th><th>Макс</th>`
+          + `<th>День</th><th>Цена покупки</th><th>Цена продажи</th>`
+          + `</tr></thead><tbody>`;
+        for (const d of (dto.quotes || [])) {
+          html += `<tr>`
+            + `<td>${escapeHtml(d.day)}</td>`
+            + `<td>${cell(d.best_buy, "isk")}</td>`
+            + `<td>${cell(d.best_sell, "isk")}</td>`
+            + `</tr>`;
+        }
+        if (!(dto.quotes || []).length)
+          html += `<tr><td colspan="3">Нет снимков с ценами за эти дни</td></tr>`;
+        html += `</tbody></table>`;
+
+        if (dto.watched) {
+          html += `<p class="probe-meta" style="margin-top:12px"><b>Штуки ушло</b> на станции по дням (UTC). `
+            + `«В buy-ордера» — сколько штук забрали с рынка в чужие/ваши покупки; `
+            + `«Из sell-ордеров» — сколько штук купили с продаж. Считается только пока предмет в слежении.</p>`;
+          html += `<table class="probe-table"><thead><tr>`
+            + `<th>День</th><th>Штук в buy</th><th>Штук из sell</th>`
+            + `</tr></thead><tbody>`;
+          for (const d of (dto.station_days || [])) {
+            html += `<tr>`
+              + `<td>${escapeHtml(d.day)}</td>`
+              + `<td>${iskWhole.format(d.buy || 0)}</td>`
+              + `<td>${iskWhole.format(d.sell || 0)}</td>`
+              + `</tr>`;
+          }
+          if (!(dto.station_days || []).length)
+            html += `<tr><td colspan="3">За эти дни сделок на станции не поймано — нужен предмет в слежении и работающий опрос</td></tr>`;
+          html += `</tbody></table>`;
+        } else {
+          html += `<p class="probe-meta" style="margin-top:12px"><b>Штуки ушло (buy vs sell)</b> по дням здесь появятся только после «В слежение»: `
+            + `ESI по региону buy и sell не разделяет, считаем сами по ордерам на станции.</p>`;
+        }
+
+        html += `<p class="probe-meta" style="margin-top:12px"><b>Регион целиком (ESI)</b> — всего штук за день, без разбивки buy/sell. Средняя/мин/макс по всем сделкам дня.</p>`;
+        html += `<table class="probe-table"><thead><tr>`
+          + `<th>День</th><th>Штук всего</th><th>Средняя</th><th>Мин</th><th>Макс</th>`
           + `</tr></thead><tbody>`;
         for (const d of (dto.history || [])) {
           html += `<tr>`
@@ -1664,9 +1711,12 @@
     function renderTable(meta) {
       const shown = meta?.rows || [];
       if (meta) {
+        const posOnly = meta.boardPositiveMargin !== false;
         document.getElementById("rates").textContent =
           `Налог ${pct.format(meta.salesTax)}, брокерская ${pct.format(meta.brokerFee)}. ` +
-          `В снимке ${meta.tracked}, с плюсовой маржой ${meta.shown}. Маржа выше 5 000% скрыта.`;
+          `В снимке ${meta.tracked}, на доске ${meta.shown}` +
+          (posOnly ? " (только плюсовая маржа)" : "") +
+          `. Маржа выше 5 000% скрыта.`;
         page = meta.page || 1;
         const pages = meta.pages || 1;
         document.getElementById("page-label").textContent = `страница ${page} из ${pages}`;
@@ -1683,11 +1733,14 @@
       const empty = document.getElementById("empty");
       empty.hidden = shown.length > 0;
       const src = boardSources();
+      const posOnly = !meta || meta.boardPositiveMargin !== false;
       empty.textContent = !src.jita && !src.perimeter
         ? "Включите Jita или Perimeter."
         : columnFilters().any
           ? "Ничего не найдено."
-          : "В этом снимке нет строк с плюсовой маржой.";
+          : posOnly
+            ? "В этом снимке нет строк с плюсовой маржой."
+            : "В этом снимке нет строк для доски.";
       for (const r of shown) {
         const tr = document.createElement("tr");
         tr.className = "type-probe";
@@ -1787,8 +1840,10 @@
       empty.hidden = rows.length > 0;
       for (const r of rows) {
         const tr = document.createElement("tr");
+        tr.className = "type-probe";
+        tr.dataset.t = String(r.typeId);
         tr.innerHTML =
-          `<td class="left"><a href="https://evetycoon.com/market/${r.typeId}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a></td>` +
+          `<td class="left"><button type="button" class="name-probe" data-t="${r.typeId}" title="Подробнее: история и понятный вердикт">${escapeHtml(r.name)}</button></td>` +
           `<td class="left">${escapeHtml(r.locationName)}</td>` +
           `<td>${r.typeId}</td>` +
           `<td class="left">${escapeHtml(r.note || "")}</td>` +
@@ -2004,6 +2059,7 @@
         document.getElementById("filter-blueprints").checked = s.filterBlueprints !== false;
         document.getElementById("min-sell").value = iskWhole.format(s.minSellPrice ?? 1000000);
         document.getElementById("min-haul").value = iskWhole.format(s.minHaulSellPrice ?? 500000);
+        document.getElementById("board-positive-margin").checked = s.boardPositiveMargin !== false;
         document.getElementById("db-size").textContent = "Сейчас на диске: " + bytes(s.databaseBytes);
         settingsReady = true;
       }
@@ -2056,6 +2112,7 @@
     bindTypeProbeClicks(document.getElementById("body"));
     bindTypeProbeClicks(document.getElementById("signal-body"));
     bindTypeProbeClicks(document.getElementById("pf-body"));
+    bindTypeProbeClicks(document.getElementById("watch-body"));
     document.addEventListener("keydown", event => {
       if (event.key === "Escape") closeProbe();
     });
@@ -2140,7 +2197,8 @@
         filterSpecialEdition: document.getElementById("filter-special").checked,
         filterBlueprints: document.getElementById("filter-blueprints").checked,
         minSellPrice: parseGrouped(document.getElementById("min-sell").value),
-        minHaulSellPrice: parseGrouped(document.getElementById("min-haul").value)
+        minHaulSellPrice: parseGrouped(document.getElementById("min-haul").value),
+        boardPositiveMargin: document.getElementById("board-positive-margin").checked
       };
       const resp = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!resp.ok) {

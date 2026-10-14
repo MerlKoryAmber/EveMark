@@ -10,7 +10,9 @@ public sealed record FeeSettings(
     bool FilterSpecialEdition = true,
     bool FilterBlueprints = true,
     decimal MinSellPrice = 1_000_000m,
-    decimal MinHaulSellPrice = 500_000m)
+    decimal MinHaulSellPrice = 500_000m,
+    /// <summary>Доска Закуп: скрывать строки с маржой ≤ 0 после комиссий. Сигнал/портфель/развоз не трогает.</summary>
+    bool BoardPositiveMargin = true)
 {
     public long DatabaseBytes { get; init; }
 

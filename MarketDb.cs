@@ -64,6 +64,8 @@ public sealed class SignalDto
     public string Tone { get; init; } = "early";
     public string Banner { get; init; } = "";
     public int Snapshots { get; init; }
+    /// <summary>Снимков в скользящем окне сигнала (см. <see cref="SignalRule.Lookback"/>).</summary>
+    public int RecentSnapshots { get; init; }
     public int Shown { get; init; }
     public int Page { get; init; } = 1;
     public int PageSize { get; init; } = 200;
@@ -77,8 +79,12 @@ public static class SignalRule
 {
     public const int MinSnapshots = 6;
     public const int MinHours = 6;
-    /// <summary>Макс. простой между снимками живой вилки (рестарт софта), дальше серия «Часов» рвётся.</summary>
+    /// <summary>Макс. простой между снимками живой вилки на закупе (рестарт софта), дальше серия «Часов» рвётся.</summary>
     public static readonly TimeSpan MaxHoursGap = TimeSpan.FromHours(3);
+    /// <summary>Сигнал: скользящее окно для часов / раннего баннера / средней. Простой ПК внутри окна серию не рвёт.</summary>
+    public static readonly TimeSpan Lookback = TimeSpan.FromHours(48);
+    /// <summary>Сигнал: средняя ESI — VWAP за столько полных календарных дней (&lt; сегодня UTC).</summary>
+    public const int AverageDays = 2;
     public const decimal MinMarginFrac = 0.03m;
     public const decimal MaxMarginFrac = 1m;
     public const long MinDailyVolume = 10;
@@ -97,6 +103,8 @@ public sealed class BoardDto
     public int Page { get; init; } = 1;
     public int PageSize { get; init; } = 200;
     public int Pages { get; init; } = 1;
+    /// <summary>Настройка: на закупе скрывать маржу ≤ 0.</summary>
+    public bool BoardPositiveMargin { get; init; } = true;
     public IReadOnlyList<BoardRow> Rows { get; init; } = [];
 }
 
@@ -460,6 +468,8 @@ public sealed partial class MarketDb
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             INSERT INTO setting (key, value) VALUES ('min_haul_sell_price', $mhp)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            INSERT INTO setting (key, value) VALUES ('board_positive_margin', $bpm)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             """,
             ("$a", settings.Accounting.ToString(CultureInfo.InvariantCulture)),
             ("$b", settings.BrokerRelations.ToString(CultureInfo.InvariantCulture)),
@@ -470,7 +480,8 @@ public sealed partial class MarketDb
             ("$fs", settings.FilterSpecialEdition ? "1" : "0"),
             ("$fb", settings.FilterBlueprints ? "1" : "0"),
             ("$msp", settings.MinSellPrice.ToString(CultureInfo.InvariantCulture)),
-            ("$mhp", settings.MinHaulSellPrice.ToString(CultureInfo.InvariantCulture))), ct);
+            ("$mhp", settings.MinHaulSellPrice.ToString(CultureInfo.InvariantCulture)),
+            ("$bpm", settings.BoardPositiveMargin ? "1" : "0")), ct);
 
     public Task<DateTime?> GetLastSnapshotUtcAsync(CancellationToken ct = default) =>
         WithAsync(async conn =>
@@ -1021,13 +1032,15 @@ public sealed partial class MarketDb
             };
             var need = section is "churn" or "squeeze" ? 4 : SignalRule.MinSnapshots;
             var load = await LoadRankedAsync(conn, ct);
-            if (load.Snapshots < need)
+            var recent = await CountSnapshotsSinceAsync(conn, DateTime.UtcNow - SignalRule.Lookback, ct);
+            if (recent < need)
             {
                 return new SignalDto
                 {
                     Tone = "early",
-                    Banner = EarlyBanner(section, load.Snapshots, need),
+                    Banner = EarlyBanner(section, recent, need),
                     Snapshots = load.Snapshots,
+                    RecentSnapshots = recent,
                     SalesTax = load.Fees.SalesTax,
                     BrokerFee = load.Fees.BrokerFee
                 };
@@ -1039,7 +1052,8 @@ public sealed partial class MarketDb
                     && row.MarginFrac <= SignalRule.MaxMarginFrac
                     && row.DailyVolume >= SignalRule.MinDailyVolume)
                 .ToList();
-            await FillHoursAsync(conn, candidates, load.Fees, ct);
+            await FillHoursAsync(conn, candidates, load.Fees, ct, rollingSignal: true);
+            await ApplySignalAverageAsync(conn, candidates, ct);
             if (section is "churn" or "shout")
             {
                 foreach (var row in candidates)
@@ -1078,6 +1092,7 @@ public sealed partial class MarketDb
                       + $" Подозрительных: {filtered.Count(r => r.Anomaly).ToString(CultureInfo.InvariantCulture)} (внизу списка)."
                     : SectionBanner(section, shout, signals.Count > 0),
                 Snapshots = load.Snapshots,
+                RecentSnapshots = recent,
                 Shown = filtered.Count,
                 Page = current,
                 PageSize = pageSize,
@@ -1340,7 +1355,12 @@ public sealed partial class MarketDb
             var ranked = load.Rows;
             if (load.TakenAt is null)
             {
-                return new BoardDto { SalesTax = fees.SalesTax, BrokerFee = fees.BrokerFee };
+                return new BoardDto
+                {
+                    SalesTax = fees.SalesTax,
+                    BrokerFee = fees.BrokerFee,
+                    BoardPositiveMargin = fees.BoardPositiveMargin
+                };
             }
 
             var takenAt = load.TakenAt;
@@ -1352,7 +1372,10 @@ public sealed partial class MarketDb
             if (hoursFilterOn || sortKey == "hours")
                 await FillHoursAsync(conn, ranked, fees, ct);
             var filtered = ranked
-                .Where(row => row.MarginFrac * 100m <= MaxBoardMarginPercent && MatchesColumns(row, filter))
+                .Where(row =>
+                    (!fees.BoardPositiveMargin || row.MarginIsk > 0)
+                    && row.MarginFrac * 100m <= MaxBoardMarginPercent
+                    && MatchesColumns(row, filter))
                 .ToList();
             var descending = !string.Equals(dir, "asc", StringComparison.OrdinalIgnoreCase);
             filtered.Sort((a, b) =>
@@ -1382,6 +1405,7 @@ public sealed partial class MarketDb
                 Page = current,
                 PageSize = pageSize,
                 Pages = filtered.Count == 0 ? 1 : pages,
+                BoardPositiveMargin = fees.BoardPositiveMargin,
                 Rows = rows
             };
         }, ct);
@@ -1503,8 +1527,6 @@ public sealed partial class MarketDb
             if (quote.BestBuy is not decimal buy || buy <= 0)
                 continue;
             var (margin, fraction) = FeeMath.Margin(buy, quote.BestSell, fees.SalesTax, fees.BrokerFee);
-            if (margin <= 0)
-                continue;
             history.TryGetValue(quote.TypeId, out var hist);
             histWindows.TryGetValue(quote.TypeId, out var bars);
             var vols7 = bars?.TakeLast(7).Select(b => b.Vol).ToList() ?? [];
@@ -1718,68 +1740,143 @@ public sealed partial class MarketDb
 
     private sealed record RankedLoad(FeeSettings Fees, string? TakenAt, int Tracked, int Snapshots, List<BoardRow> Rows);
 
-    private static async Task FillHoursAsync(SqliteConnection conn, List<BoardRow> rows, FeeSettings fees, CancellationToken ct)
+    private static async Task FillHoursAsync(
+        SqliteConnection conn, List<BoardRow> rows, FeeSettings fees, CancellationToken ct, bool rollingSignal = false)
     {
         if (rows.Count == 0)
             return;
-        var since = Stamp(DateTime.UtcNow.AddDays(-14));
-            var series = new Dictionary<int, List<Point>>();
-            if (rows.Count > 0)
+        var since = rollingSignal
+            ? Stamp(DateTime.UtcNow - SignalRule.Lookback)
+            : Stamp(DateTime.UtcNow.AddDays(-14));
+        var series = new Dictionary<int, List<Point>>();
+        await using var temp = conn.CreateCommand();
+        temp.CommandText = "CREATE TEMP TABLE IF NOT EXISTS pick (type_id INTEGER PRIMARY KEY); DELETE FROM pick;";
+        await temp.ExecuteNonQueryAsync(ct);
+        await using var ins = conn.CreateCommand();
+        ins.CommandText = "INSERT OR IGNORE INTO pick (type_id) VALUES ($id)";
+        var p = ins.Parameters.Add("$id", SqliteType.Integer);
+        foreach (var row in rows)
+        {
+            p.Value = row.TypeId;
+            await ins.ExecuteNonQueryAsync(ct);
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT s.taken_at, q.type_id, q.best_buy, q.best_sell, q.buy_volume, q.sell_volume
+            FROM quote q
+            JOIN snapshot s ON s.id = q.snapshot_id
+            JOIN pick p ON p.type_id = q.type_id
+            WHERE s.taken_at >= $since AND q.best_buy IS NOT NULL
+            ORDER BY s.taken_at DESC
+            """;
+        cmd.Parameters.AddWithValue("$since", since);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var typeId = ReadInt(reader, 1);
+            if (!series.TryGetValue(typeId, out var list))
             {
-                await using var temp = conn.CreateCommand();
-                temp.CommandText = "CREATE TEMP TABLE IF NOT EXISTS pick (type_id INTEGER PRIMARY KEY); DELETE FROM pick;";
-                await temp.ExecuteNonQueryAsync(ct);
-                await using var ins = conn.CreateCommand();
-                ins.CommandText = "INSERT OR IGNORE INTO pick (type_id) VALUES ($id)";
-                var p = ins.Parameters.Add("$id", SqliteType.Integer);
-                foreach (var row in rows)
-                {
-                    p.Value = row.TypeId;
-                    await ins.ExecuteNonQueryAsync(ct);
-                }
-
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText = """
-                    SELECT s.taken_at, q.type_id, q.best_buy, q.best_sell, q.buy_volume, q.sell_volume
-                    FROM quote q
-                    JOIN snapshot s ON s.id = q.snapshot_id
-                    JOIN pick p ON p.type_id = q.type_id
-                    WHERE s.taken_at >= $since AND q.best_buy IS NOT NULL
-                    ORDER BY s.taken_at DESC
-                    """;
-                cmd.Parameters.AddWithValue("$since", since);
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
-                {
-                    var typeId = ReadInt(reader, 1);
-                    if (!series.TryGetValue(typeId, out var list))
-                    {
-                        list = [];
-                        series[typeId] = list;
-                    }
-
-                    list.Add(new Point(
-                        DateTime.Parse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-                        ReadDec(reader, 2),
-                        ReadDec(reader, 3),
-                        ReadLong(reader, 4),
-                        ReadLong(reader, 5)));
-                }
+                list = [];
+                series[typeId] = list;
             }
+
+            list.Add(new Point(
+                DateTime.Parse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                ReadDec(reader, 2),
+                ReadDec(reader, 3),
+                ReadLong(reader, 4),
+                ReadLong(reader, 5)));
+        }
 
         for (var i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
             var points = series.GetValueOrDefault(row.TypeId);
+            // Дёргают/сжатие: только плотная серия ≤90 мин — скользящее окно не меняет.
             var (buyMoves, sellMoves) = Moves(points);
             rows[i] = row with
             {
-                Hours = Streak(points, fees),
+                Hours = rollingSignal ? StreakRolling(points, fees) : Streak(points, fees),
                 Thin = ThinSide(row.BuyVolume, row.SellVolume),
                 BuyMoves = buyMoves,
                 SellMoves = sellMoves,
                 MarginThen = MarginBeforeDrop(points, fees)
             };
+        }
+    }
+
+    private static async Task<int> CountSnapshotsSinceAsync(SqliteConnection conn, DateTime sinceUtc, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM snapshot WHERE taken_at >= $s";
+        cmd.Parameters.AddWithValue("$s", Stamp(sinceUtc));
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Сигнал: средняя = VWAP ESI The Forge за до <see cref="SignalRule.AverageDays"/> полных дней.</summary>
+    private static async Task ApplySignalAverageAsync(SqliteConnection conn, List<BoardRow> rows, CancellationToken ct)
+    {
+        if (rows.Count == 0)
+            return;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var from = DateOnly.FromDateTime(DateTime.UtcNow)
+            .AddDays(-SignalRule.AverageDays - 1)
+            .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        await using var temp = conn.CreateCommand();
+        temp.CommandText = "CREATE TEMP TABLE IF NOT EXISTS pick_avg (type_id INTEGER PRIMARY KEY); DELETE FROM pick_avg;";
+        await temp.ExecuteNonQueryAsync(ct);
+        await using var ins = conn.CreateCommand();
+        ins.CommandText = "INSERT OR IGNORE INTO pick_avg (type_id) VALUES ($id)";
+        var p = ins.Parameters.Add("$id", SqliteType.Integer);
+        foreach (var row in rows)
+        {
+            p.Value = row.TypeId;
+            await ins.ExecuteNonQueryAsync(ct);
+        }
+
+        var bars = new Dictionary<int, List<(long Vol, decimal Avg)>>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT h.type_id, h.volume, h.average
+            FROM daily_history h
+            JOIN pick_avg p ON p.type_id = h.type_id
+            WHERE h.region_id = $forge AND h.day < $today AND h.day >= $from
+            ORDER BY h.type_id, h.day
+            """;
+        cmd.Parameters.AddWithValue("$forge", TradeHubs.ForgeRegionId);
+        cmd.Parameters.AddWithValue("$today", today);
+        cmd.Parameters.AddWithValue("$from", from);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var typeId = ReadInt(reader, 0);
+            if (!bars.TryGetValue(typeId, out var list))
+            {
+                list = [];
+                bars[typeId] = list;
+            }
+
+            list.Add((ReadLong(reader, 1), ReadDec(reader, 2)));
+        }
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            if (!bars.TryGetValue(row.TypeId, out var list) || list.Count == 0)
+            {
+                rows[i] = row with { Average = null };
+                continue;
+            }
+
+            var take = list.Count <= SignalRule.AverageDays
+                ? list
+                : list.Skip(list.Count - SignalRule.AverageDays).ToList();
+            var volSum = take.Sum(b => b.Vol);
+            decimal? avg = volSum > 0
+                ? take.Sum(b => b.Avg * b.Vol) / volSum
+                : take.Average(b => b.Avg);
+            rows[i] = row with { Average = avg };
         }
     }
 
@@ -1910,8 +2007,8 @@ public sealed partial class MarketDb
             .Replace("\u00a0", "", StringComparison.Ordinal);
 
     /// <summary>
-    /// Часы жизни вилки по стенам часов: от самого свежего до самого старого снимка
-    /// непрерывной серии (разрыв &gt; <see cref="SignalRule.MaxHoursGap"/> или мёртвая вилка рвут). Не число волн.
+    /// Закуп: часы жизни вилки по стенам часов — непрерывная серия
+    /// (разрыв &gt; <see cref="SignalRule.MaxHoursGap"/> или мёртвая вилка рвут). Не число волн.
     /// </summary>
     private static int Streak(List<Point>? points, FeeSettings fees)
     {
@@ -1937,6 +2034,38 @@ public sealed partial class MarketDb
         return (int)Math.Floor((newest.Value - oldest.Value).TotalHours);
     }
 
+    /// <summary>
+    /// Сигнал: часы в скользящем окне <see cref="SignalRule.Lookback"/>.
+    /// Мёртвая вилка рвёт; простой без снимков (ПК выключен) — нет.
+    /// </summary>
+    private static int StreakRolling(List<Point>? points, FeeSettings fees)
+    {
+        if (points is null || points.Count == 0)
+            return 0;
+        var cut = DateTime.UtcNow - SignalRule.Lookback;
+        DateTime? newest = null;
+        DateTime? oldest = null;
+        foreach (var point in points)
+        {
+            var t = point.Time.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(point.Time, DateTimeKind.Utc)
+                : point.Time.ToUniversalTime();
+            if (t < cut)
+                break;
+            var (margin, _) = FeeMath.Margin(point.Buy, point.Sell, fees.SalesTax, fees.BrokerFee);
+            if (margin <= 0 || point.BuyVolume < SignalRule.MinTouch || point.SellVolume < SignalRule.MinTouch)
+                break;
+            newest ??= t;
+            oldest = t;
+        }
+
+        if (newest is null || oldest is null)
+            return 0;
+        var hours = (int)Math.Floor((newest.Value - oldest.Value).TotalHours);
+        var cap = (int)SignalRule.Lookback.TotalHours;
+        return hours > cap ? cap : hours;
+    }
+
     private static async Task<FeeSettings> ReadSettingsAsync(SqliteConnection conn)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1957,7 +2086,8 @@ public sealed partial class MarketDb
             ParseBool(map, "filter_special_edition", true),
             ParseBool(map, "filter_blueprints", true),
             minSell < 0 ? 1_000_000m : minSell,
-            minHaul < 0 ? 500_000m : minHaul);
+            minHaul < 0 ? 500_000m : minHaul,
+            ParseBool(map, "board_positive_margin", true));
     }
 
     private static bool ParseBool(Dictionary<string, string> map, string key, bool fallback)
@@ -2151,18 +2281,22 @@ public sealed partial class MarketDb
             && inside <= row.BestSell
     };
 
-    private static string EarlyBanner(string section, int have, int need) => section switch
+    private static string EarlyBanner(string section, int have, int need)
     {
-        "churn" => $"Рано смотреть дёрганье. Нужно минимум {need} часовых снимков, сейчас {have}.",
-        "squeeze" => $"Рано смотреть сжатие. Нужно минимум {need} часовых снимков, сейчас {have}.",
-        _ => $"Рано кричать. Нужно минимум {need} часовых снимков, сейчас {have}."
-    };
+        var win = ((int)SignalRule.Lookback.TotalHours).ToString(CultureInfo.InvariantCulture);
+        return section switch
+        {
+            "churn" => $"Рано смотреть дёрганье. Нужно минимум {need} снимков за последние {win} ч, сейчас {have}.",
+            "squeeze" => $"Рано смотреть сжатие. Нужно минимум {need} снимков за последние {win} ч, сейчас {have}.",
+            _ => $"Рано кричать. Нужно минимум {need} снимков за последние {win} ч, сейчас {have}."
+        };
+    }
 
     private static string SectionBanner(string section, bool shout, bool any) => section switch
     {
         "off" => any
-            ? "Вчерашняя средняя цена вне спреда. Это не вход."
-            : "Таких нет. Средняя вчера либо внутри спреда, либо её не было.",
+            ? "Средняя за 1–2 дня ESI вне спреда. Это не вход."
+            : "Таких нет. Средняя за 1–2 дня либо внутри спреда, либо её не было.",
         "churn" => any
             ? "Цену двигают каждый час. Перестановка съест маржу."
             : "Пока никого не дёргают три часа подряд.",
@@ -2171,7 +2305,7 @@ public sealed partial class MarketDb
             : "Сжатия нет. Маржа не падает три часа подряд.",
         _ => shout
             ? "Есть шанс заработать. Иди покупай."
-            : "Пока тихо. Нет спреда, который держится, даёт объём и сидит вокруг вчерашней средней."
+            : "Пока тихо. Нет спреда, который держится в окне 48 ч, даёт объём и сидит вокруг средней за 1–2 дня."
     };
 
     private static string ThinSide(long buy, long sell)
